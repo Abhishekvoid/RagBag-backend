@@ -1,0 +1,13 @@
+WARNING 2025-07-27 15:18:12,608 log 33808 3048 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-07-27 15:18:17,651 log 33808 3048 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-07-27 15:18:23,770 log 33808 3048 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-07-27 15:18:48,174 log 33808 3048 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-07-27 15:18:53,729 log 33808 3048 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-07-27 15:22:28,232 log 29940 3212 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-07-27 15:22:35,432 log 29940 3212 Method Not Allowed: /auth/register/
+WARNING 2025-07-27 15:22:35,527 log 29940 3212 Not Found: /favicon.ico
+INFO 2025-07-27 15:23:01,705 views 29940 34124 User registered successfully: space@gmail.com
+WARNING 2025-07-27 18:04:47,273 log 5404 13572 Unauthorized: /auth/jwt/create/
+WARNING 2025-07-27 18:04:48,112 log 5404 13572 Unauthorized: /auth/jwt/create/
+WARNING 2025-07-27 18:05:20,896 log 5404 13572 Method Not Allowed: /auth/jwt/create/
+WARNING 2025-07-27 18:05:20,994 log 5404 13572 Not Found: /favicon.ico

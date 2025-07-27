@@ -1,11 +1,9 @@
-
-from pathlib import Path
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timedelta
 
 load_dotenv()
-
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -13,12 +11,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
-    raise Exception("SECRET_KEY is not set in environment variables")
+    raise ValueError("SECRET_KEY must be set in .env file")
 
 
-ALLOWED_HOSTS = [host for host in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if host]
+ALLOWED_HOSTS = [
+    host.strip() 
+    for host in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',') 
+    if host.strip()
+]
 
 
 
@@ -66,7 +68,9 @@ ROOT_URLCONF = 'core.urls'
 
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
+    origin.strip() 
+    for origin in os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+    if origin.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
 
@@ -80,6 +84,15 @@ REST_FRAMEWORK = {
     ),
 }
 
+REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES'] = [
+    'rest_framework.throttling.AnonRateThrottle',
+    'rest_framework.throttling.UserRateThrottle'
+]
+REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+    'anon': '10/hour',
+    'user': '100/hour'
+}
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -89,9 +102,16 @@ CHANNEL_LAYERS = {
     },
 }
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(
+        minutes=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 15))
+    ),
+    'REFRESH_TOKEN_LIFETIME': timedelta(
+        days=int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME_DAYS', 7))
+    ),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'ALGORITHM': 'HS256',
 }
 SITE_ID = 1
 
@@ -130,15 +150,38 @@ X_FRAME_OPTIONS = "DENY"
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'HOST': 'db.plemeggubdfpsgfpgccu.supabase.co',
-        'NAME': 'postgres',
-        'USER': 'postgres',
-        'PORT': '5432',
-        'PASSWORD': 'Abhi_2002_void',
+        'HOST': os.getenv('SUPABASE_DB_HOST'),
+        'NAME': os.getenv('SUPABASE_DB_NAME'),
+        'USER': os.getenv('SUPABASE_DB_USER'),
+        'PORT': os.getenv('SUPABASE_DB_PORT', '5432'),
+        'PASSWORD': os.getenv('SUPABASE_DB_PASSWORD'),
+        'OPTIONS': {
+            'sslmode': 'require',
+        },
     }
 }
-
-
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'django.log',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['file'],
+        'level': 'INFO',
+    },
+}
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -181,8 +224,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_ROOT = BASE_DIR / "media"
 
-
-print('STATIC_ROOT =', repr(STATIC_ROOT))
 
 LOGIN_REDIRECT_URL = '/'
 
