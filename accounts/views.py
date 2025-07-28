@@ -4,10 +4,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
+from rest_framework.permissions import IsAuthenticated
 
 logger = logging.getLogger(__name__)
 class RegisterAPIView(APIView):
@@ -54,4 +55,32 @@ class RegisterAPIView(APIView):
                 'error': 'Internal server error'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ChatMessageView(APIView):
+    throttle_classes = [UserRateThrottle]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+
+            serializer = ChatMessageSerializer(data = request.data)
+
+            if not serializer.is_valid():
+                chat_message = serializer.save()
+                logger.info(f"Chat message saved: user={request.user}, session_id={chat_message.session.id}")
+                resp_data = {
+                    "msg": chat_message.text,
+                    "sender": chat_message.sender,
+                    "created_at": chat_message.created_at,
+                }
+                return Response(resp_data, status=status.HTTP_201_CREATED)
+            
+            else:
+                logger.warning(f"Invalid chat message attempt by user={request.user}: {serializer.errors}")
+                return Response(
+                {"error": "Invalid input", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+                )
+        
+     
+
+        
