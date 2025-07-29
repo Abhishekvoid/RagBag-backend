@@ -118,7 +118,7 @@ class ChatSession(models.Model):
 class ChatMessage(models.Model):
 
     session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name='message')
-    snder = models.CharField(max_length=16, choices=[('user', 'User'), ('ai', 'AI')])
+    sender = models.CharField(max_length=16, choices=[('user', 'User'), ('ai', 'AI')])
     text = models.TextField()
 
     # for LLM usage / pricing
