@@ -13,3 +13,7 @@ WARNING 2025-07-27 18:05:20,896 log 5404 13572 Method Not Allowed: /auth/jwt/cre
 WARNING 2025-07-27 18:05:20,994 log 5404 13572 Not Found: /favicon.ico
 WARNING 2025-07-27 23:37:05,753 log 36620 31308 Method Not Allowed: /auth/register/
 WARNING 2025-07-27 23:37:05,860 log 36620 31308 Not Found: /favicon.ico
+WARNING 2025-07-29 22:21:55,790 log 33988 27056 Not Found: /
+WARNING 2025-07-29 22:21:55,845 log 33988 27056 Not Found: /favicon.ico
+WARNING 2025-07-30 00:05:43,312 log 33988 27056 Not Found: /favicon.ico
+WARNING 2025-07-30 00:05:48,092 log 33988 27056 Not Found: /favicon.ico

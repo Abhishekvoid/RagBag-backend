@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer
@@ -9,6 +9,7 @@ import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
+from .models import ChatMessage, ChatSession
 
 logger = logging.getLogger(__name__)
 class RegisterAPIView(APIView):
@@ -81,6 +82,25 @@ class ChatMessageView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
                 )
         
-     
+
+class ChatSessionView(generics.ListAPIView):
+    permission_classes= [IsAuthenticated]
+    serializer_class = ChatSessionSerializer
+
+
+    def get_queryset(self):
+        return ChatSession.objects.filter(user = self.request.user).order_by('-updated_at')
+    
+    def perform_create(self, serializer):
+        serializer.save(user = self.request.user)
+
+class ChatSessionRetriveView(generics.RetrieveAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChatSessionSerializer
+
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return ChatSession.objects.filter(user=self.request.user)
 
         
