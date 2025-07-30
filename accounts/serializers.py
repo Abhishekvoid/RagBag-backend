@@ -1,8 +1,7 @@
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Document, ChatMessage, ChatSession
-
+from .models import Document, ChatMessage, ChatSession, Chapter, Subject
 User = get_user_model()
 
 ALLOWED_EXTENSIONS = ["pdf", "doc", "docx", "ppt", "pptx", "jpg", "jpeg", "png", "gif"]
@@ -27,6 +26,51 @@ class RegisterSerializers(BaseUserCreateSerializer):
         attrs.pop('password2')
         return super().validate(attrs)
 
+# ------------- subject ------------
+class SubjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Subject
+        fields = ['user', 'name', 'description', 'created_at', 'updated_at']
+        
+        ready_only_fieelds = ['user', 'name', 'created_at', 'updated_at']
+
+
+        def validate_name(self, value):
+            if not value.strip():
+                raise serializers.ValidationError("subject name can't be blank")
+            return value
+        
+        def create(self, validated_data):
+
+            user= self.context['request'].user
+            validated_data['user'] = user
+            return super().create(validated_data)
+        
+# ------------ chapter -----------------
+
+class ChapterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Chapter
+        fields = ['id', 'subject', 'name', 'order', 'created_at', 'updated_at']
+        read_only_fields = ('created_at', 'updated_at')
+
+    def validate_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Chapter name cannot be blank.")
+        return value
+
+    def validate_order(self, value):
+        if value < 1:
+            raise serializers.ValidationError("Order must be a positive integer.")
+        return value
+
+    def validate(self, data):
+        # Optional: if subject is set, you can validate the subject belongs to user here
+        request = self.context.get('request')
+        subject = data.get('subject')
+        if subject and subject.user != request.user:
+            raise serializers.ValidationError("Subject does not belong to the authenticated user.")
+        return data
 
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
