@@ -4,12 +4,12 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectSerializer, ChapterSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
-from .models import ChatMessage, ChatSession
+from .models import ChatMessage, ChatSession, Document, Subject, Chapter
 
 logger = logging.getLogger(__name__)
 class RegisterAPIView(APIView):
@@ -57,6 +57,71 @@ class RegisterAPIView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 
+# ------------ subject --------------
+
+
+class SubjectListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = SubjectSerializer
+
+    def get_queryset(self):
+        return Subject.objects.filter(user=self.request.user).order_by('created_at')
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+class  SubjectDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = SubjectSerializer
+    
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Subject.objects.filter(user=self.request.user)
+# ------------ documents ------------
+
+class DocumentListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DocumentSerializer
+
+    def get_queryset(self):
+        return Document.objects.filter(user=self.request.user).order_by('-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DocumentSerializer
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Document.objects.filter(user=self.request.user)
+    
+
+# ------------- chapter ------------
+
+class ChapterListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChapterSerializer
+
+    def get_queryset(self):
+        return Chapter.objects.filter(user=self.request.user).order_by('created_at')
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+class ChapterDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChapterSerializer
+    
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Chapter.objects.filter(user=self.request.user)
+    
+
+# ---------  chatmessage ---------------
 class ChatMessageView(APIView):
     throttle_classes = [UserRateThrottle]
     permission_classes = [IsAuthenticated]

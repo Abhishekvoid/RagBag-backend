@@ -17,3 +17,8 @@ WARNING 2025-07-29 22:21:55,790 log 33988 27056 Not Found: /
 WARNING 2025-07-29 22:21:55,845 log 33988 27056 Not Found: /favicon.ico
 WARNING 2025-07-30 00:05:43,312 log 33988 27056 Not Found: /favicon.ico
 WARNING 2025-07-30 00:05:48,092 log 33988 27056 Not Found: /favicon.ico
+WARNING 2025-07-30 23:07:48,396 log 2128 20188 Not Found: /
+WARNING 2025-07-30 23:07:48,449 log 2128 20188 Not Found: /favicon.ico
+INFO 2025-07-30 23:09:19,397 views 2128 30020 User registered successfully: pen@gmail.com
+WARNING 2025-07-30 23:13:31,569 log 2128 20188 Unauthorized: /auth/jwt/create/
+WARNING 2025-07-30 23:13:32,440 log 2128 20188 Unauthorized: /auth/jwt/create/
