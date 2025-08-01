@@ -10,6 +10,7 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 class RegisterSerializers(BaseUserCreateSerializer):
     password1 = serializers.CharField(write_only=True)
     password2 = serializers.CharField(write_only=True)
+    name = serializers.CharField(required=True, max_length=100)
 
     class Meta(BaseUserCreateSerializer.Meta):
         model = User
@@ -32,7 +33,7 @@ class SubjectSerializer(serializers.ModelSerializer):
         model  = Subject
         fields = ['user', 'name', 'description', 'created_at', 'updated_at']
         
-        ready_only_fieelds = ['user', 'name', 'created_at', 'updated_at']
+        ready_only_fieelds = ['user', 'created_at', 'updated_at']
 
 
         def validate_name(self, value):
