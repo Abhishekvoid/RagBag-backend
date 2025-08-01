@@ -18,6 +18,7 @@ class CustomUserModel(AbstractBaseUser, PermissionsMixin):
         validators=[EmailValidator()],
         db_index=True
         )
+    name  = models.CharField(max_length=100)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     date_joined= models.DateTimeField(default=timezone.now)

@@ -4,10 +4,10 @@ from .models import CustomUserModel, Subject, Chapter, Document, ChatMessage, Ch
 
 class CustomUserAdmin(BaseUserAdmin):
     model = CustomUserModel
-    list_display = ['email', 'is_staff', 'is_active']
+    list_display = ['email', 'name', 'is_staff', 'is_active']
     list_filter = ['is_staff', 'is_active']
     fieldsets = (
-        (None, {'fields': ('email', 'password')}),
+        (None, {'fields': ('email', 'name', 'password')}),
         ('Permissions', {'fields': ('is_staff', 'is_active', 'is_superuser', 'groups', 'user_permissions')}),
         ('Dates', {'fields': ('last_login', 'date_joined')}),
     )
@@ -17,7 +17,7 @@ class CustomUserAdmin(BaseUserAdmin):
             'fields': ('email', 'password1', 'password2', 'is_staff', 'is_active')}
         ),
     )
-    search_fields = ('email',)
+    search_fields = ('email', 'name')
     ordering = ('email',)
 
 admin.site.register(CustomUserModel, CustomUserAdmin)

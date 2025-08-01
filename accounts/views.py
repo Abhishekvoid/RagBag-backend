@@ -35,6 +35,7 @@ class RegisterAPIView(APIView):
                 'user': {
                     'id': user.id,
                     'email': user.email,
+                    'name' : user.name,
                     'date_joined': user.date_joined.isoformat(),
                 },
                 'tokens': {
