@@ -1,0 +1,6 @@
+
+celery -A core worker -l info -P gevent
+
+python manage.py shell
+
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
