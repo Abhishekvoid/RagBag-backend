@@ -86,7 +86,7 @@ class DocumentListCreateView(generics.ListCreateAPIView):
     serializer_class = DocumentSerializer
 
     def get_queryset(self):
-        return Document.objects.filter(user=self.request.user).order_by('-created_at')
+        return Document.objects.filter(chapter__subject__user=self.request.user).order_by('-created_at')
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -107,7 +107,7 @@ class ChapterListCreateView(generics.ListCreateAPIView):
     serializer_class = ChapterSerializer
 
     def get_queryset(self):
-        return Chapter.objects.filter(user=self.request.user).order_by('created_at')
+        return Chapter.objects.filter(subject__user=self.request.user).order_by('created_at')
     
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
