@@ -38,11 +38,11 @@ class ChapterAdmin(admin.ModelAdmin):
     ordering = ['subject', 'order']
 
 
-@admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ["title", "user", "chapter", "file_type", "size_bytes", "created_at"]
+    # Add 'status' to list_display and list_filter
+    list_display = ["title", "user", "chapter", "status", "file_type", "size_bytes", "created_at"]
     search_fields = ["title", "chapter__name", "user__email"]
-    list_filter = ["file_type", "user", "chapter__subject"]
+    list_filter = ["status", "file_type", "user", "chapter__subject"] # Add status here too
     ordering = ["-created_at"]
 
 

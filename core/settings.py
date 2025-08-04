@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'djoser',
     'channels',
+    'storages',
     'accounts',
 ]
 
@@ -125,6 +126,22 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
+# ---------- S3boto3storage -----------
+
+DEFAULT_FILE_STORAGE = 'storages.backends.s3_boto3.S3Boto3Storage'
+AWS_ACCESS_KEY_ID = os.getenv('SUPABASE_ACCESS_KEY')
+AWS_SECRET_ACCESS_KEY = os.getenv('SUPABASE_SECRET_KEY')
+AWS_STORAGE_BUCKET_NAME = os.getenv('SUPABASE_BUCKET_NAME')
+
+AWS_S3_ENDPOINT_URL = f"{os.getenv('SUPABASE_PROJECT_URL')}/storage/v1"
+
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400', # Cache files for one day
+}
+
+AWS_DEFAULT_ACL = 'public-read' 
+AWS_S3_FILE_OVERWRITE = False
+AWS_S3_CUSTOM_DOMAIN = f"{os.getenv('SUPABASE_PROJECT_REF')}.supabase.co/storage/v1/object/public/{os.getenv('SUPABASE_BUCKET_NAME')}"
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
