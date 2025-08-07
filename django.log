@@ -256,3 +256,639 @@ WARNING 2025-08-02 19:43:10,349 log 32052 31196 Unauthorized: /auth/subjects/
 WARNING 2025-08-02 20:32:48,814 log 32052 31196 Unauthorized: /auth/subjects/
 WARNING 2025-08-02 21:31:10,818 log 17784 11604 Not Found: /
 WARNING 2025-08-02 21:31:18,101 log 17784 11604 Not Found: /.well-known/appspecific/com.chrome.devtools.json
+INFO 2025-08-05 08:53:51,852 autoreload 44906 130973726392320 Watching for file changes with StatReloader
+WARNING 2025-08-05 08:54:35,785 log 44906 130972923143744 Method Not Allowed: /auth/jwt/create
+WARNING 2025-08-05 08:54:36,138 log 44906 130972923143744 Not Found: /favicon.ico
+INFO 2025-08-05 09:05:21,446 autoreload 44906 130973726392320 /home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py changed, reloading.
+INFO 2025-08-05 09:05:23,081 autoreload 45788 128261603876864 Watching for file changes with StatReloader
+INFO 2025-08-05 09:05:26,561 autoreload 45843 138826119106560 Watching for file changes with StatReloader
+ERROR 2025-08-05 09:06:38,531 log 45843 138825315591744 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 243, in get
+    return self.list(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 46, in list
+    return Response(serializer.data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 797, in data
+    ret = super().data
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 251, in data
+    self._data = self.to_representation(self.instance)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 715, in to_representation
+    return [
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 716, in <listcomp>
+    self.child.to_representation(item) for item in iterable
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 525, in to_representation
+    for field in fields:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 386, in _readable_fields
+    for field in self.fields.values():
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/utils/functional.py", line 47, in __get__
+    res = instance.__dict__[self.name] = self.func(instance)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 374, in fields
+    for key, value in self.get_fields().items():
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 1105, in get_fields
+    field_class, field_kwargs = self.build_field(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 1251, in build_field
+    return self.build_unknown_field(field_name, model_class)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 1369, in build_unknown_field
+    raise ImproperlyConfigured(
+django.core.exceptions.ImproperlyConfigured: Field name `iduser` is not valid for model `Subject` in `accounts.serializers.SubjectSerializer`.
+INFO 2025-08-05 09:09:21,059 autoreload 45843 138826119106560 /home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py changed, reloading.
+INFO 2025-08-05 09:09:22,884 autoreload 46395 129138461224960 Watching for file changes with StatReloader
+INFO 2025-08-05 09:09:25,280 autoreload 46395 129138461224960 /home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py changed, reloading.
+INFO 2025-08-05 09:09:26,137 autoreload 46424 139822835363840 Watching for file changes with StatReloader
+INFO 2025-08-05 09:09:56,294 autoreload 46424 139822835363840 /home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py changed, reloading.
+INFO 2025-08-05 09:09:58,012 autoreload 46498 136098978181120 Watching for file changes with StatReloader
+INFO 2025-08-05 09:10:05,652 autoreload 46577 123833565474816 Watching for file changes with StatReloader
+ERROR 2025-08-05 09:10:28,655 log 46577 123832763360832 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 243, in get
+    return self.list(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 46, in list
+    return Response(serializer.data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 797, in data
+    ret = super().data
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 251, in data
+    self._data = self.to_representation(self.instance)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 715, in to_representation
+    return [
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 716, in <listcomp>
+    self.child.to_representation(item) for item in iterable
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 525, in to_representation
+    for field in fields:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 386, in _readable_fields
+    for field in self.fields.values():
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/utils/functional.py", line 47, in __get__
+    res = instance.__dict__[self.name] = self.func(instance)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 374, in fields
+    for key, value in self.get_fields().items():
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 1105, in get_fields
+    field_class, field_kwargs = self.build_field(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 1251, in build_field
+    return self.build_unknown_field(field_name, model_class)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 1369, in build_unknown_field
+    raise ImproperlyConfigured(
+django.core.exceptions.ImproperlyConfigured: Field name `iduser` is not valid for model `Subject` in `accounts.serializers.SubjectSerializer`.
+INFO 2025-08-05 09:14:10,046 autoreload 46577 123833565474816 /home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py changed, reloading.
+INFO 2025-08-05 09:14:11,956 autoreload 47339 136221918621696 Watching for file changes with StatReloader
+INFO 2025-08-05 09:14:20,957 autoreload 47339 136221918621696 /home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py changed, reloading.
+INFO 2025-08-05 09:14:22,113 autoreload 47406 125649339195392 Watching for file changes with StatReloader
+INFO 2025-08-05 09:16:15,997 autoreload 47588 140070620487680 Watching for file changes with StatReloader
+WARNING 2025-08-05 09:27:19,034 log 48785 125888647603776 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 09:43:25,453 log 50365 133655941817920 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 10:01:34,601 log 52122 136007011739200 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 10:02:33,813 log 52122 136007011739200 Bad Request: /auth/subjects/
+WARNING 2025-08-05 10:09:38,180 log 52122 136007011739200 Bad Request: /auth/subjects/
+ERROR 2025-08-05 10:11:49,755 log 52799 133237482399296 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+psycopg2.errors.DatatypeMismatch: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('f4e3741f-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 19, in create
+    self.perform_create(serializer)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/views.py", line 161, in perform_create
+    serializer.save(user=self.request.user)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 902, in save
+    self.save_base(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1008, in save_base
+    updated = self._save_table(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1169, in _save_table
+    results = self._do_insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1210, in _do_insert
+    return manager._insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/sql/compiler.py", line 1882, in execute_sql
+    cursor.execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 122, in execute
+    return super().execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+django.db.utils.ProgrammingError: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('f4e3741f-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+ERROR 2025-08-05 10:14:08,788 log 53059 134065658209856 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+psycopg2.errors.DatatypeMismatch: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('d805e005-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 19, in create
+    self.perform_create(serializer)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/views.py", line 161, in perform_create
+    serializer.save(user=self.request.user)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 902, in save
+    self.save_base(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1008, in save_base
+    updated = self._save_table(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1169, in _save_table
+    results = self._do_insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1210, in _do_insert
+    return manager._insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/sql/compiler.py", line 1882, in execute_sql
+    cursor.execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 122, in execute
+    return super().execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+django.db.utils.ProgrammingError: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('d805e005-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+WARNING 2025-08-05 10:22:33,385 log 53059 134065658209856 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 10:55:43,985 log 57028 133936643515968 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 10:55:44,010 log 57028 133936643515968 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 11:33:42,671 log 58513 131371044382272 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 11:46:20,461 log 61430 138071415662144 Not Found: /admin/accounts/document/
+WARNING 2025-08-05 11:46:20,727 log 61430 138071415662144 Not Found: /favicon.ico
+WARNING 2025-08-05 11:49:43,103 log 61430 138071415662144 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 12:07:47,463 log 61430 138071415662144 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 12:24:31,550 log 65519 123500749596224 Unauthorized: /auth/subjects/
+WARNING 2025-08-05 12:42:30,300 log 65519 123500749596224 Unauthorized: /auth/subjects/
+ERROR 2025-08-06 05:55:53,998 log 11623 138660874757696 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+psycopg2.errors.DatatypeMismatch: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('1ae2b108-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 19, in create
+    self.perform_create(serializer)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/views.py", line 161, in perform_create
+    serializer.save(user=self.request.user)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py", line 48, in create
+    return super().create(validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 902, in save
+    self.save_base(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1008, in save_base
+    updated = self._save_table(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1169, in _save_table
+    results = self._do_insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1210, in _do_insert
+    return manager._insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/sql/compiler.py", line 1882, in execute_sql
+    cursor.execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 122, in execute
+    return super().execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+django.db.utils.ProgrammingError: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('1ae2b108-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+ERROR 2025-08-06 05:58:59,819 log 11623 138660874757696 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+psycopg2.errors.DatatypeMismatch: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('bb4f5226-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 19, in create
+    self.perform_create(serializer)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/views.py", line 161, in perform_create
+    serializer.save(user=self.request.user)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py", line 48, in create
+    return super().create(validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 902, in save
+    self.save_base(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1008, in save_base
+    updated = self._save_table(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1169, in _save_table
+    results = self._do_insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1210, in _do_insert
+    return manager._insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/sql/compiler.py", line 1882, in execute_sql
+    cursor.execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 122, in execute
+    return super().execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+django.db.utils.ProgrammingError: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('bb4f5226-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+ERROR 2025-08-06 06:04:08,289 log 11623 138660874757696 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+psycopg2.errors.DatatypeMismatch: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('9a9057dd-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 19, in create
+    self.perform_create(serializer)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/views.py", line 161, in perform_create
+    serializer.save(user=self.request.user)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py", line 48, in create
+    return super().create(validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 902, in save
+    self.save_base(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1008, in save_base
+    updated = self._save_table(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1169, in _save_table
+    results = self._do_insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1210, in _do_insert
+    return manager._insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/sql/compiler.py", line 1882, in execute_sql
+    cursor.execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 122, in execute
+    return super().execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+django.db.utils.ProgrammingError: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('9a9057dd-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+ERROR 2025-08-06 06:14:56,683 log 13548 127806280246848 Internal Server Error: /auth/subjects/
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+psycopg2.errors.DatatypeMismatch: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('22bc8363-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/core/handlers/base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/decorators/csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/views/generic/base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/mixins.py", line 19, in create
+    self.perform_create(serializer)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/views.py", line 161, in perform_create
+    serializer.save(user=self.request.user)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+  File "/home/abhishekubuntu/RagBag/backend/RagBag-backend/accounts/serializers.py", line 48, in create
+    return super().create(validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/rest_framework/serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 902, in save
+    self.save_base(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1008, in save_base
+    updated = self._save_table(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1169, in _save_table
+    results = self._do_insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/base.py", line 1210, in _do_insert
+    return manager._insert(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/models/sql/compiler.py", line 1882, in execute_sql
+    cursor.execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 122, in execute
+    return super().execute(sql, params)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "/home/abhishekubuntu/RagBag/.venv/lib/python3.10/site-packages/django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+django.db.utils.ProgrammingError: column "id" is of type bigint but expression is of type uuid
+LINE 1: ...description", "created_at", "updated_at") VALUES ('22bc8363-...
+                                                             ^
+HINT:  You will need to rewrite or cast the expression.
+
+WARNING 2025-08-06 06:43:31,702 log 16071 125064255108672 Not Found: /favicon.ico
+WARNING 2025-08-06 08:43:37,652 log 7986 124156185089600 Not Found: /favicon.ico
+WARNING 2025-08-06 09:35:42,880 log 7986 124156185089600 Unauthorized: /auth/subjects/
+WARNING 2025-08-06 10:04:55,811 log 17742 124292973930048 Unauthorized: /auth/subjects/
+WARNING 2025-08-06 10:24:25,230 log 17742 124292973930048 Unauthorized: /auth/subjects/
+WARNING 2025-08-06 10:43:29,213 log 17742 124292973930048 Unauthorized: /auth/subjects/
+WARNING 2025-08-06 11:06:02,080 log 17742 124292973930048 Unauthorized: /auth/subjects/
+WARNING 2025-08-06 11:25:57,588 log 17742 124292973930048 Unauthorized: /auth/chapters/
+WARNING 2025-08-06 12:09:25,318 log 17742 124292973930048 Unauthorized: /auth/subjects/
+WARNING 2025-08-06 12:33:32,324 log 33898 128284594480704 Unauthorized: /auth/subjects/
+WARNING 2025-08-07 04:53:00,660 log 8150 126962051782208 Unauthorized: /auth/subjects/
+WARNING 2025-08-07 04:53:00,715 log 8150 126962051782208 Unauthorized: /auth/subjects/
+WARNING 2025-08-07 04:53:02,987 log 8150 126962051782208 Not Found: /favicon.ico
