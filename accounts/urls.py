@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView,  SubjectDetailView, ChapterDetailView, ChapterListCreateView, DocumentListCreateView, DocumentDetailView
+from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, DocumentListCreateView, DocumentDetailView
 
 
 urlpatterns = [
@@ -11,11 +11,11 @@ urlpatterns = [
 
     # Subject endpoints
     path('subjects/', SubjectListCreateView.as_view(), name='subjects-list-create'),
-    path('subjects/<uuid:id>/', SubjectDetailView.as_view(), name='subject-detail'),
+    path('subjects/<uuid:id>/',SubjectListCreateView.as_view(), name='subject-detail'),
 
     # Chapter endpoints
     path('chapters/', ChapterListCreateView.as_view(), name='chapters-list-create'),
-    path('chapters/<uuid:id>/', ChapterDetailView.as_view(), name='chapter-detail'),
+    path('chapters/<uuid:id>/',ChapterListCreateView.as_view(), name='chapter-detail'),
 
     # Document endpoints
     path('documents/', DocumentListCreateView.as_view(), name='documents-list-create'),

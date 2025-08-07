@@ -36,11 +36,16 @@ class ChapterWriteSerializer(serializers.ModelSerializer):
         # The user will provide the parent subject's UUID, the name, and the order.
         fields = ['subject', 'name', 'order']
 
-    
+    extra_kwargs = {
+        'subject': {'required': False, 'allow_null': True}
+    }
     def validate_subject(self, value):
         """
         Check that the subject is owned by the user making the request.
         """
+        if value is None:
+            return value
+        
         request = self.context.get('request')
         if value.user != request.user:
             raise serializers.ValidationError("You do not have permission to add a chapter to this subject.")
