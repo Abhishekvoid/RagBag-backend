@@ -48,14 +48,18 @@ class Subject(models.Model):
 
 class Chapter(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters')
+    user = models.ForeignKey(CustomUserModel, on_delete=models.CASCADE, related_name='chapters')
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters', null=True, blank=True)
     name = models.CharField(max_length=100)
     order = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.subject.name} - {self.name}"
+        
+        if self.subject:
+            return f"{self.subject.name} - {self.name}"
+        return f"Standalone Chapter - {self.name}"
 
 class Document(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

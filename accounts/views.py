@@ -154,9 +154,9 @@ class SubjectListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
+       
         return Subject.objects.filter(user=self.request.user).order_by('created_at')
     
-  
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return SubjectWriteSerializer
@@ -165,18 +165,43 @@ class SubjectListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-class SubjectDetailView(generics.RetrieveUpdateDestroyAPIView):
-    permission_classes = [IsAuthenticated]
-    lookup_field = 'id'
+ 
+    def create(self, request, *args, **kwargs):
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        self.perform_create(write_serializer)
+        read_serializer = SubjectReadSerializer(write_serializer.instance)
+        headers = self.get_success_headers(read_serializer.data)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-    def get_queryset(self):
-        return Subject.objects.filter(user=self.request.user)
+    def list(self, request, *args, **kwargs):
+       
+        queryset = self.get_queryset()
+        subject_serializer = self.get_serializer(queryset, many=True)
+        subjects_data = subject_serializer.data
 
-  
-    def get_serializer_class(self):
-        if self.request.method in ['PUT', 'PATCH']:
-            return SubjectWriteSerializer
-        return SubjectReadSerializer
+        
+        uncategorized_chapters = Chapter.objects.filter(user=request.user, subject__isnull=True)
+        
+        
+        
+        if uncategorized_chapters.exists():
+            chapter_serializer = ChapterReadSerializer(uncategorized_chapters, many=True)
+            
+            uncategorized_section = {
+               
+                "id": "uncategorized-chapters",
+                "name": "Uncategorized",
+                "user": str(request.user.id),
+                "chapters": chapter_serializer.data,
+                "description": "Chapters not assigned to a subject.",
+              
+                "created_at": "",
+                "updated_at": "",
+            }
+            subjects_data.insert(0, uncategorized_section)
+
+        return Response(subjects_data)
 # ------------ documents ------------
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -207,27 +232,29 @@ class ChapterListCreateView(generics.ListCreateAPIView):
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
+            
             return ChapterWriteSerializer
+      
         return ChapterReadSerializer
 
     def get_queryset(self):
-        return Chapter.objects.filter(subject__user=self.request.user).order_by('created_at')
+          return Chapter.objects.filter(user=self.request.user).order_by('order', 'created_at')
 
     def perform_create(self, serializer):
-        serializer.save()  # subject is passed via payload; ownership is checked in the serializer
+      
+        serializer.save(user=self.request.user)
 
+    
+    def create(self, request, *args, **kwargs):
+    
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        self.perform_create(write_serializer)
 
-class ChapterDetailView(generics.RetrieveUpdateDestroyAPIView):
-    permission_classes = [IsAuthenticated]
-    lookup_field = 'id'
-
-    def get_serializer_class(self):
-        if self.request.method in ['PUT', 'PATCH']:
-            return ChapterWriteSerializer
-        return ChapterReadSerializer
-
-    def get_queryset(self):
-        return Chapter.objects.filter(subject__user=self.request.user)
+        read_serializer = ChapterReadSerializer(write_serializer.instance)
+        
+        headers = self.get_success_headers(read_serializer.data)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 # ---------  chatmessage ---------------
 class ChatMessageView(APIView):
