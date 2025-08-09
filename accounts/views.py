@@ -15,7 +15,9 @@ from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
 import google.generativeai as genai
 from groq import Groq
-from .tasks import process_document_ingestion
+from .tasks import process_document_ingestion, create_chapter_from_document
+from rest_framework.parsers import MultiPartParser, FormParser
+
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +156,6 @@ class SubjectListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-       
         return Subject.objects.filter(user=self.request.user).order_by('created_at')
     
     def get_serializer_class(self):
@@ -165,7 +166,6 @@ class SubjectListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
- 
     def create(self, request, *args, **kwargs):
         write_serializer = self.get_serializer(data=request.data)
         write_serializer.is_valid(raise_exception=True)
@@ -175,46 +175,47 @@ class SubjectListCreateView(generics.ListCreateAPIView):
         return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def list(self, request, *args, **kwargs):
-       
         queryset = self.get_queryset()
         subject_serializer = self.get_serializer(queryset, many=True)
         subjects_data = subject_serializer.data
 
-        
         uncategorized_chapters = Chapter.objects.filter(user=request.user, subject__isnull=True)
-        
-        
         
         if uncategorized_chapters.exists():
             chapter_serializer = ChapterReadSerializer(uncategorized_chapters, many=True)
             
             uncategorized_section = {
-               
                 "id": "uncategorized-chapters",
                 "name": "Uncategorized",
                 "user": str(request.user.id),
                 "chapters": chapter_serializer.data,
                 "description": "Chapters not assigned to a subject.",
-              
                 "created_at": "",
                 "updated_at": "",
             }
             subjects_data.insert(0, uncategorized_section)
 
         return Response(subjects_data)
+
 # ------------ documents ------------
 
 class DocumentListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = DocumentSerializer
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
-        return Document.objects.filter(chapter__subject__user=self.request.user).order_by('-created_at')
+        return Document.objects.filter(user=self.request.user).order_by('-created_at')
 
     def perform_create(self, serializer):
+        # The user is assigned automatically
         document = serializer.save(user=self.request.user)
-        process_document_ingestion.delay(str(document.id))
-        logger.info(f"Triggered ingestion task for document: {document.id}")
+        
+        # ✅ FIX: Trigger our new smart chapter creation task instead of the old one
+        create_chapter_from_document.delay(str(document.id))
+        
+        logger.info(f"Triggered create_chapter_from_document task for doc: {document.id}")
+
 
 class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
@@ -223,7 +224,6 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Document.objects.filter(user=self.request.user)
-    
 
 # ------------- chapter ------------
 

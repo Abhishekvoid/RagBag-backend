@@ -7,9 +7,13 @@ from .manager import CustomUserManager
 
 
 def user_document_path(instance, filename):
-    """Generates a unique path for user documents."""
-   
-    return f'docs/{instance.user.id}/{instance.chapter.subject.id}/{instance.chapter.id}/{filename}'
+ 
+    if hasattr(instance, 'chapter') and instance.chapter and hasattr(instance.chapter, 'subject') and instance.chapter.subject:
+     
+        return f'docs/{instance.user.id}/{instance.chapter.subject.id}/{instance.chapter.id}/{filename}'
+    else:
+    
+        return f'docs/{instance.user.id}/standalone/{filename}'
 
 class CustomUserModel(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -63,7 +67,7 @@ class Chapter(models.Model):
 
 class Document(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='documents')
+    chapter = models.ForeignKey(Chapter,on_delete=models.SET_NULL, related_name='documents', null=True, blank=True)
     user = models.ForeignKey(CustomUserModel, on_delete=models.CASCADE, related_name='documents')
     title = models.CharField(max_length=100)
     file = models.FileField(upload_to=user_document_path)
