@@ -908,3 +908,258 @@ WARNING 2025-08-07 12:01:18,445 log 14909 138780631574080 Unauthorized: /auth/su
 WARNING 2025-08-07 12:18:06,091 log 14909 138780631574080 Unauthorized: /auth/subjects/
 WARNING 2025-08-07 12:34:00,734 log 14909 138780631574080 Unauthorized: /auth/subjects/
 WARNING 2025-08-07 13:00:53,270 log 14909 138780631574080 Unauthorized: /auth/subjects/
+WARNING 2025-08-09 00:42:53,348 log 22964 16232 Unauthorized: /auth/subjects/
+WARNING 2025-08-09 19:01:06,209 log 19984 8248 Not Found: /documents/
+WARNING 2025-08-09 19:02:03,695 log 19984 8248 Not Found: /documents/
+WARNING 2025-08-09 19:02:03,735 log 19984 8248 Not Found: /favicon.ico
+WARNING 2025-08-09 19:02:11,833 log 19984 8248 Unauthorized: /auth/documents/
+WARNING 2025-08-09 19:07:57,137 log 19984 8248 Bad Request: /auth/documents/
+WARNING 2025-08-09 19:17:37,107 log 17404 18528 Unauthorized: /auth/subjects/
+WARNING 2025-08-09 19:18:01,806 log 17404 18528 Bad Request: /auth/documents/
+WARNING 2025-08-09 19:18:18,675 log 17404 18528 Unauthorized: /auth/documents/
+WARNING 2025-08-09 19:18:21,167 log 17404 18528 Unauthorized: /auth/documents/
+WARNING 2025-08-09 19:18:21,339 log 17404 18528 Unauthorized: /auth/documents/
+WARNING 2025-08-09 19:18:22,098 log 17404 18528 Unauthorized: /auth/documents/
+WARNING 2025-08-09 19:18:22,264 log 17404 18528 Unauthorized: /auth/documents/
+WARNING 2025-08-09 19:18:22,442 log 17404 18528 Unauthorized: /auth/documents/
+ERROR 2025-08-09 19:28:57,760 log 4824 16020 Internal Server Error: /auth/documents/
+Traceback (most recent call last):
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\core\handlers\exception.py", line 42, in inner
+    response = await get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\core\handlers\base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+        request, *callback_args, **callback_kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\views\generic\base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\mixins.py", line 19, in create
+    self.perform_create(serializer)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\views.py", line 210, in perform_create
+    document = serializer.save(user=self.request.user)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+                    ~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\serializers.py", line 108, in create
+    return super().create(validated_data)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\models.py", line 96, in save
+    super().save(*args, **kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 902, in save
+    self.save_base(
+    ~~~~~~~~~~~~~~^
+        using=using,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        update_fields=update_fields,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 1008, in save_base
+    updated = self._save_table(
+        raw,
+    ...<4 lines>...
+        update_fields,
+    )
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 1169, in _save_table
+    results = self._do_insert(
+        cls._base_manager, using, fields, returning_fields, raw
+    )
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 1210, in _do_insert
+    return manager._insert(
+           ~~~~~~~~~~~~~~~^
+        [self],
+        ^^^^^^^
+    ...<3 lines>...
+        raw=raw,
+        ^^^^^^^^
+    )
+    ^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1881, in execute_sql
+    for sql, params in self.as_sql():
+                       ~~~~~~~~~~~^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1806, in as_sql
+    self.prepare_value(field, self.pre_save_val(field, obj))
+                              ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1750, in pre_save_val
+    return field.pre_save(obj, add=True)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\fields\files.py", line 338, in pre_save
+    file.save(file.name, file.file, save=False)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\fields\files.py", line 98, in save
+    name = self.field.generate_filename(self.instance, name)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\fields\files.py", line 353, in generate_filename
+    filename = self.upload_to(instance, filename)
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\models.py", line 12, in user_document_path
+    return f'docs/{instance.user.id}/{instance.chapter.subject.id}/{instance.chapter.id}/{filename}'
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'subject'
+WARNING 2025-08-09 19:58:21,473 log 32384 9524 Unauthorized: /auth/subjects/
+WARNING 2025-08-10 00:09:20,183 log 32912 14464 Unauthorized: /auth/subjects/
+ERROR 2025-08-10 00:09:44,167 log 32912 14464 Internal Server Error: /auth/documents/
+Traceback (most recent call last):
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\core\handlers\exception.py", line 42, in inner
+    response = await get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\core\handlers\base.py", line 253, in _get_response_async
+    response = await wrapped_callback(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+        request, *callback_args, **callback_kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\asgiref\sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\views\decorators\csrf.py", line 65, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\views\generic\base.py", line 105, in view
+    return self.dispatch(request, *args, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 515, in dispatch
+    response = self.handle_exception(exc)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 475, in handle_exception
+    self.raise_uncaught_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 486, in raise_uncaught_exception
+    raise exc
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\views.py", line 512, in dispatch
+    response = handler(request, *args, **kwargs)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\generics.py", line 246, in post
+    return self.create(request, *args, **kwargs)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\mixins.py", line 19, in create
+    self.perform_create(serializer)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\views.py", line 212, in perform_create
+    document = serializer.save(user=self.request.user)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+                    ~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\serializers.py", line 108, in create
+    return super().create(validated_data)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\rest_framework\serializers.py", line 991, in create
+    instance = ModelClass._default_manager.create(**validated_data)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\query.py", line 663, in create
+    obj.save(force_insert=True, using=self.db)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\models.py", line 96, in save
+    super().save(*args, **kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 902, in save
+    self.save_base(
+    ~~~~~~~~~~~~~~^
+        using=using,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        update_fields=update_fields,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 1008, in save_base
+    updated = self._save_table(
+        raw,
+    ...<4 lines>...
+        update_fields,
+    )
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 1169, in _save_table
+    results = self._do_insert(
+        cls._base_manager, using, fields, returning_fields, raw
+    )
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\base.py", line 1210, in _do_insert
+    return manager._insert(
+           ~~~~~~~~~~~~~~~^
+        [self],
+        ^^^^^^^
+    ...<3 lines>...
+        raw=raw,
+        ^^^^^^^^
+    )
+    ^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\query.py", line 1868, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1881, in execute_sql
+    for sql, params in self.as_sql():
+                       ~~~~~~~~~~~^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1806, in as_sql
+    self.prepare_value(field, self.pre_save_val(field, obj))
+                              ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1750, in pre_save_val
+    return field.pre_save(obj, add=True)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\fields\files.py", line 338, in pre_save
+    file.save(file.name, file.file, save=False)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\fields\files.py", line 98, in save
+    name = self.field.generate_filename(self.instance, name)
+  File "C:\Users\Abhishek\Chatapp\backend\venv\Lib\site-packages\django\db\models\fields\files.py", line 353, in generate_filename
+    filename = self.upload_to(instance, filename)
+  File "C:\Users\Abhishek\Chatapp\backend\accounts\models.py", line 12, in user_document_path
+    return f'docs/{instance.user.id}/{instance.chapter.subject.id}/{instance.chapter.id}/{filename}'
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'subject'
+INFO 2025-08-10 00:17:23,962 views 19768 32948 Triggered create_chapter_from_document task for doc: eb7ec15e-7b36-48bb-9df8-738baeb39b31
+INFO 2025-08-10 00:17:54,737 views 19768 39776 Triggered create_chapter_from_document task for doc: e73b956a-076f-40f9-93bd-590e9c704818
+INFO 2025-08-10 00:24:38,521 views 19600 21256 Triggered create_chapter_from_document task for doc: 1fe2b5e1-c2a6-4765-9be3-042106156246

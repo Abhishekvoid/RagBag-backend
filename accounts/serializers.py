@@ -80,9 +80,15 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = [
-            "id", "chapter", "user", "title", "file", "file_type", "size_bytes", "created_at", "updated_at"
+            "id", "chapter", "user", "title", "file", "file_type", 
+            "size_bytes", "created_at", "updated_at"
         ]
-        read_only_fields = ("file_type", "size_bytes", "created_at", "updated_at")
+        # Make 'title' and 'chapter' optional in the API
+        read_only_fields = ("user", "file_type", "size_bytes", "created_at", "updated_at")
+        extra_kwargs = {
+            'title': {'required': False},
+            'chapter': {'required': False, 'allow_null': True}
+        }
 
     def validate_file(self, file):
         ext = file.name.split(".")[-1].lower()
@@ -92,6 +98,14 @@ class DocumentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("File exceeds maximum allowed size (50MB).")
         return file
 
+    def create(self, validated_data):
+        # Automatically set the title from the filename if it's not provided
+        if 'title' not in validated_data:
+            file = validated_data.get('file')
+            if file:
+                # Remove the file extension for a cleaner title
+                validated_data['title'] = file.name.rsplit('.', 1)[0]
+        return super().create(validated_data)
 
 class ChatSessionSerializer(serializers.ModelSerializer):
 

@@ -1,78 +1,85 @@
 import os
 import logging
 import tiktoken
+import io # Import for in-memory file handling
 from celery import shared_task
 from django.conf import settings
 from django.core.files.storage import default_storage
 from qdrant_client import QdrantClient, models
-from qdrant_client.http.models import UpdateStatus
 import google.generativeai as genai
 import PyPDF2
 import docx
 from pptx import Presentation
 from dotenv import load_dotenv
+from qdrant_client.models import PointStruct
+from groq import Groq # Import Groq
 
-from .models import Document
+# Import your Chapter and Document models
+from .models import Document, Chapter
 
+BATCH_SIZE = 100
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
 GOOGLE_API_KEY = getattr(settings, "GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
+GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 EMBEDDING_MODEL = "text-embedding-004"
+LLM_MODEL = "mixtral-8x7b-32768"
 QDRANT_COLLECTION_NAME = "studywise_documents"
-EMBEDDING_BATCH_SIZE = 100
 TOKENIZER_NAME = "cl100k_base"
-MAX_CHUNKS_PER_DOCUMENT = 1000 # Process a maximum of 1000 chunks
+MAX_CHUNKS_PER_DOCUMENT = 1000
 
+# Client initialization moved inside tasks to be process-safe
 _qdrant_client = None
 _tokenizer = None
+_groq_client = None
 
 def _get_clients():
-
-    global _qdrant_client, _tokenizer
+    global _qdrant_client, _tokenizer, _groq_client
     if _qdrant_client is None:
-        logger.info("Initializing Qdrant client...")
         _qdrant_client = QdrantClient(QDRANT_URL)
     if _tokenizer is None:
-        logger.info("Initializing TikToken Tokenizer")
         _tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
-    return _qdrant_client, _tokenizer
+    if _groq_client is None:
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY is not set.")
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _qdrant_client, _tokenizer, _groq_client
 
 def _initialize_google_ai():
     if not GOOGLE_API_KEY:
-        raise ValueError("GOOGLE_API_KEY is not set in Django settings or .env file.")
+        raise ValueError("GOOGLE_API_KEY is not set.")
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # ---- HELPER FUNCTIONS -------
 
 def get_text_from_file(document_path, file_type):
-    text =""
+    text = ""
     with default_storage.open(document_path, 'rb') as f:
+        # Read file into an in-memory stream for robustness
+        in_memory_file = io.BytesIO(f.read())
+        
         if file_type == 'pdf':
-            reader = PyPDF2.PdfReader(f)
+            reader = PyPDF2.PdfReader(in_memory_file)
             for page in reader.pages:
                 text += page.extract_text() or ""
         elif file_type == 'docx':
-            doc = docx.Document(f)
+            doc = docx.Document(in_memory_file)
             for para in doc.paragraphs:
                 text += para.text + "\n"
-        elif file_type =='pptx':
-            prs = Presentation(f)
+        elif file_type == 'pptx':
+            prs = Presentation(in_memory_file)
             for slide in prs.slides:
                 for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for paragraph in shape.text_frame.paragraphs:
-                            for run in paragraph.runs:
-                                text += run.text
-                            text += '\n'
+                    if hasattr(shape, 'text'):
+                        text += shape.text + "\n"
         elif file_type == 'txt':
-            text = f.read().decode('utf-8', errors='ignore')
+            text = in_memory_file.read().decode('utf-8', errors='ignore')
     return text
 
 def chunk_text_by_token(text, tokenizer, chunk_size=384, chunk_overlap=50):
-
-    if not text or not tokenizer: return[]
+    if not text or not tokenizer: return []
     tokens = tokenizer.encode(text)
     chunks = []
     start = 0
@@ -84,84 +91,121 @@ def chunk_text_by_token(text, tokenizer, chunk_size=384, chunk_overlap=50):
         start += chunk_size - chunk_overlap
     return chunks
 
-
-# ----- MAIN CELERY TASK --------
-
+# ----- NEW "SMART CHAPTER" TASK -----
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def process_document_ingestion(self, document_id: str):
-
-    try:
-        qdrant_client, tokenizer = _get_clients()
-        _initialize_google_ai()
-    except Exception as e:
-        logger.critical(f"Failed to initialize clients for task {self.request.id}. Error: {e}")
-        raise self.retry(exc=e)
-    
-    logger.info(f"starting ingestion pipeline for Document ID: {document_id}")
+def create_chapter_from_document(self, document_id: str):
+    logger.info(f"[{document_id}] Starting smart chapter creation...")
     doc = None
-    try: 
-        doc = Document.objects.get(id= document_id)
-        doc.status = "Processing"
-        doc.save(Update_fields=['status'])
+    try:
+        _, _, groq_client = _get_clients()
+        _initialize_google_ai()
+
+        doc = Document.objects.get(id=document_id)
+        doc.status = "PROCESSING"
+        doc.save()
 
         document_text = get_text_from_file(doc.file.name, doc.file_type)
-        if not document_text.strip():
+        if not document_text:
             raise ValueError("No text could be extracted from the document.")
+
+        prompt = f"Based on the following text, create a short, descriptive title (4-5 words max) for a new chapter. Do not use quotes.\n\nTEXT:\n{document_text[:4000]}\n\nTITLE:"
+        chat_completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model=LLM_MODEL,
+        )
+        ai_generated_title = chat_completion.choices[0].message.content.strip().strip('"')
+
+        new_chapter = Chapter.objects.create(user=doc.user, name=ai_generated_title)
+
+        doc.chapter = new_chapter
+        doc.title = ai_generated_title
+        doc.save()
+
+        process_document_ingestion.delay(str(doc.id))
+
+        logger.info(f"[{document_id}] Successfully created chapter '{ai_generated_title}'")
+    except Exception as e:
+        logger.error(f"[{document_id}] Smart chapter creation failed: {e}", exc_info=True)
+        if doc:
+            doc.status = 'FAILED'
+            doc.save()
+        raise self.retry(exc=e)
+
+# ----- ORIGINAL DOCUMENT PROCESSING TASK --------
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def process_document_ingestion(self, document_id: str):
+    logger.info(f"[{document_id}] Starting document ingestion for RAG...")
+    doc = None
+    try:
+        qdrant_client, tokenizer, _ = _get_clients()
+        _initialize_google_ai()
         
-        doc.extracted_text = document_text
-        doc.save(update_fields=['extracted_text'])
-        logger.info(f"-> Text extracted successfully.")
+        doc = Document.objects.get(id=document_id)
+        if not doc.extracted_text:
+            logger.info(f"[{document_id}] Extracting text for ingestion...")
+            doc.extracted_text = get_text_from_file(doc.file.name, doc.file_type)
+            doc.save(update_fields=['extracted_text'])
 
-        text_chunks = chunk_text_by_token(document_text, tokenizer)
-        if len(text_chunks) > MAX_CHUNKS_PER_DOCUMENT:
-            logger.warning(f"documents {document_id} has {len(text_chunks)} chunks, excesding the limit of {MAX_CHUNKS_PER_DOCUMENT}. Truncating.")
-            text_chunks = text_chunks[:MAX_CHUNKS_PER_DOCUMENT]
-        logger.info(f"-> Text split into {len(text_chunks)} tokens-based chunks.")
+        if not doc.extracted_text.strip():
+            raise ValueError("No text available for ingestion.")
 
-        embedding_info = genai.get_model(f"models/{EMBEDDING_MODEL}")
-        vector_size = embedding_info.output_dimensionality
+        text_chunks = chunk_text_by_token(doc.extracted_text, tokenizer)
+        if not text_chunks:
+            raise ValueError("Text could not be split into chunks.")
+            
+        logger.info(f"[{document_id}] Generating embeddings for {len(text_chunks)} chunks...")
+        response = genai.embed_content(
+            model=f"models/{EMBEDDING_MODEL}",
+            content=text_chunks,
+            task_type="RETRIEVAL_DOCUMENT"
+        )
+        all_embeddings = response['embedding']
+        vector_size = len(all_embeddings[0])
 
-
-        try: 
-            qdrant_client.get_collection(collection_name=QDRANT_COLLECTION_NAME)
+        try:
+            qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
         except Exception:
-            logger.info(f"Qdrant collection not found. Creating with vector size {vector_size}.")
-            qdrant_client.create_collection(
+            qdrant_client.recreate_collection(
                 collection_name=QDRANT_COLLECTION_NAME,
-                vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+                vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
             )
 
-        all_embeddings = []
-        for i in range(0, len(text_chunks), EMBEDDING_BATCH_SIZE):
-            batch = text_chunks[i:i + EMBEDDING_BATCH_SIZE]
-            result = genai.embed_content(model=f"model/{EMBEDDING_MODEL}", content=batch, task_type="RETRIEVAL_DOCUMENT")
+        # ✅ FIX: points_batch is now a local variable
+        points_batch = []
+        for i, (chunk, vector) in enumerate(zip(text_chunks, all_embeddings)):
+            points_batch.append(PointStruct(
+                id=f"{document_id}_{i}",
+                vector=vector,
+                payload={
+                    "text": chunk,
+                    "document_id": str(document_id),
+                    "file_type": doc.file_type,
+                    "user_id": str(doc.user.id) # Important for filtering
+                }
+            ))
 
-            if 'embedding' not in result:
-                raise ValueError ("Google AI API response did not contain 'embedding' key.")
-            all_embeddings.extend(result['embedding'])
-        logger.info("-> ALL embeddings generated.")
-
-        qdrant_client.upsert(
-            collection_name=QDRANT_COLLECTION_NAME,
-            points=[
-                models.PointStruct(
-                    id = f"{document_id}_{i}",
-                    vector=all_embeddings[i],
-                    payload={"text": text_chunks[i], 'document_id': str(document_id) }
-                ) for i in range (len(text_chunks))
-            ],
-            wait=True               
-        )
-        logger.info("-> Vectors sucessfully stored in Qdrant.")
-
+            if len(points_batch) >= BATCH_SIZE:
+                qdrant_client.upsert(
+                    collection_name=QDRANT_COLLECTION_NAME,
+                    points=points_batch,
+                    wait=True
+                )
+                points_batch = []
+        
+        if points_batch:
+            qdrant_client.upsert(
+                collection_name=QDRANT_COLLECTION_NAME,
+                points=points_batch,
+                wait=True
+            )
+            
         doc.status = 'COMPLETED'
-        doc.save(update_fields = ['status'])
-        logger.info(f"SUCCESS: Ingestion pipeline finished for Document ID: {document_id}")
-
+        doc.save(update_fields=['status'])
+        logger.info(f"[{document_id}] Ingestion successful.")
     except Document.DoesNotExist:
-        logger.error(f"Document with ID {document_id} not found.")
+        logger.error(f"[{document_id}] Document not found.")
     except Exception as e:
-        logger.error(f"ERROR during ingestion for Document ID {document_id}: {e}", exc_info=True)
+        logger.error(f"[{document_id}] Ingestion failed: {e}", exc_info=True)
         if doc:
             doc.status = 'FAILED'
             doc.save(update_fields=['status'])
