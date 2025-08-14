@@ -10,10 +10,10 @@ def user_document_path(instance, filename):
  
     if hasattr(instance, 'chapter') and instance.chapter and hasattr(instance.chapter, 'subject') and instance.chapter.subject:
      
-        return f'docs/{instance.user.id}/{instance.chapter.subject.id}/{instance.chapter.id}/{filename}'
+        return f'{instance.user.id}/{instance.chapter.subject.id}/{instance.chapter.id}/{filename}'
     else:
     
-        return f'docs/{instance.user.id}/standalone/{filename}'
+        return f'{instance.user.id}/standalone/{filename}'
 
 class CustomUserModel(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

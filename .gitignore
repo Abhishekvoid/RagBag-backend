@@ -1,4 +1,18 @@
-.env
-.env.local
-.env.*.local
+
+__pycache__/
+*.py[cod]
+*.sqlite3
+
+
+venv/
+env/
+
+
+*.log
 media/
+staticfiles/
+ # Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
