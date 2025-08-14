@@ -14,7 +14,7 @@ class RegisterSerializers(BaseUserCreateSerializer):
 
     class Meta(BaseUserCreateSerializer.Meta):
         model = User
-        fields = ['email', 'password1', 'password2']  
+        fields = ['email', 'name', 'password1', 'password2']  
     def validate(self, attrs):
         pw1 = attrs.get('password1')
         pw2 = attrs.get('password2')
@@ -99,12 +99,15 @@ class DocumentSerializer(serializers.ModelSerializer):
         return file
 
     def create(self, validated_data):
-        # Automatically set the title from the filename if it's not provided
-        if 'title' not in validated_data:
-            file = validated_data.get('file')
-            if file:
-                # Remove the file extension for a cleaner title
+        file = validated_data.get('file')
+
+        
+        if file:
+            validated_data['size_bytes'] = file.size
+            validated_data['file_type'] = file.name.split(".")[-1].lower()
+            if 'title' not in validated_data:
                 validated_data['title'] = file.name.rsplit('.', 1)[0]
+        
         return super().create(validated_data)
 
 class ChatSessionSerializer(serializers.ModelSerializer):

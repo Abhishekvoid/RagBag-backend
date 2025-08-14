@@ -91,13 +91,7 @@ class Document(models.Model):
     def __str__(self):
         return f"{self.title} ({self.file_type})"
 
-    def save(self, *args, **kwargs):
-      
-        if self.file and not self.pk:
-            self.size_bytes = self.file.size
-            ext = self.file.name.split(".")[-1].lower()
-            self.file_type = ext
-        super().save(*args, **kwargs)
+
 
 class ChatSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

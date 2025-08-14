@@ -1,7 +1,7 @@
 import os
 import logging
 import tiktoken
-import io # Import for in-memory file handling
+import io
 from celery import shared_task
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -12,10 +12,15 @@ import docx
 from pptx import Presentation
 from dotenv import load_dotenv
 from qdrant_client.models import PointStruct
-from groq import Groq # Import Groq
-
-# Import your Chapter and Document models
+from groq import Groq
 from .models import Document, Chapter
+
+import pytesseract
+from pdf2image import convert_from_bytes
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+import uuid
+# ---------------------------------------------
 
 BATCH_SIZE = 100
 logger = logging.getLogger(__name__)
@@ -25,12 +30,11 @@ QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
 GOOGLE_API_KEY = getattr(settings, "GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
 GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 EMBEDDING_MODEL = "text-embedding-004"
-LLM_MODEL = "mixtral-8x7b-32768"
+LLM_MODEL = "llama3-70b-8192" 
 QDRANT_COLLECTION_NAME = "studywise_documents"
 TOKENIZER_NAME = "cl100k_base"
 MAX_CHUNKS_PER_DOCUMENT = 1000
 
-# Client initialization moved inside tasks to be process-safe
 _qdrant_client = None
 _tokenizer = None
 _groq_client = None
@@ -55,15 +59,45 @@ def _initialize_google_ai():
 # ---- HELPER FUNCTIONS -------
 
 def get_text_from_file(document_path, file_type):
+    """
+    Extracts text from a file, with detailed logging for debugging.
+    """
     text = ""
+    print(f"--- Starting text extraction for {document_path} ---")
     with default_storage.open(document_path, 'rb') as f:
-        # Read file into an in-memory stream for robustness
-        in_memory_file = io.BytesIO(f.read())
-        
+        file_content_bytes = f.read()
+        print(f"Read {len(file_content_bytes)} bytes from storage.")
+        in_memory_file = io.BytesIO(file_content_bytes)
+
         if file_type == 'pdf':
-            reader = PyPDF2.PdfReader(in_memory_file)
-            for page in reader.pages:
-                text += page.extract_text() or ""
+            # 1. Attempt with PyPDF2
+            print("Attempting extraction with PyPDF2...")
+            try:
+                reader = PyPDF2.PdfReader(in_memory_file)
+                for i, page in enumerate(reader.pages):
+                    page_text = page.extract_text() or ""
+                    print(f"  PyPDF2 - Page {i+1} extracted {len(page_text)} characters.")
+                    text += page_text
+            except Exception as e:
+                print(f"  PyPDF2 failed with an error: {e}")
+                text = ""
+
+            # 2. Fallback to OCR if PyPDF2 failed
+            if not text.strip():
+                print("PyPDF2 returned no text. Falling back to OCR...")
+                try:
+                    images = convert_from_bytes(file_content_bytes)
+                    print(f"  pdf2image converted PDF into {len(images)} image(s).")
+                    full_ocr_text = ""
+                    for i, image in enumerate(images):
+                        ocr_text_per_page = pytesseract.image_to_string(image)
+                        print(f"  Tesseract OCR - Page {i+1} extracted {len(ocr_text_per_page)} characters.")
+                        full_ocr_text += ocr_text_per_page + "\n"
+                    text = full_ocr_text
+                except Exception as ocr_error:
+                    print(f"  OCR processing failed with an error: {ocr_error}")
+                    text = ""
+
         elif file_type == 'docx':
             doc = docx.Document(in_memory_file)
             for para in doc.paragraphs:
@@ -76,6 +110,7 @@ def get_text_from_file(document_path, file_type):
                         text += shape.text + "\n"
         elif file_type == 'txt':
             text = in_memory_file.read().decode('utf-8', errors='ignore')
+    print(f"--- Finished extraction. Total characters found: {len(text)} ---")
     return text
 
 def chunk_text_by_token(text, tokenizer, chunk_size=384, chunk_overlap=50):
@@ -121,6 +156,16 @@ def create_chapter_from_document(self, document_id: str):
         doc.title = ai_generated_title
         doc.save()
 
+        logger.info(f"Broadcasting notebook update to user {doc.user.id}")
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{doc.user.id}",  # Send to a group specific to this user
+            {
+                "type": "send_notification",
+                "message": "notebook_updated"
+            }
+        )
+
         process_document_ingestion.delay(str(doc.id))
 
         logger.info(f"[{document_id}] Successfully created chapter '{ai_generated_title}'")
@@ -132,6 +177,7 @@ def create_chapter_from_document(self, document_id: str):
         raise self.retry(exc=e)
 
 # ----- ORIGINAL DOCUMENT PROCESSING TASK --------
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def process_document_ingestion(self, document_id: str):
     logger.info(f"[{document_id}] Starting document ingestion for RAG...")
@@ -170,17 +216,17 @@ def process_document_ingestion(self, document_id: str):
                 vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
             )
 
-        # ✅ FIX: points_batch is now a local variable
         points_batch = []
-        for i, (chunk, vector) in enumerate(zip(text_chunks, all_embeddings)):
+        for chunk, vector in zip(text_chunks, all_embeddings):
             points_batch.append(PointStruct(
-                id=f"{document_id}_{i}",
+                # ✅ THE FIX: Generate a new, valid UUID for each point
+                id=str(uuid.uuid4()),
                 vector=vector,
                 payload={
                     "text": chunk,
                     "document_id": str(document_id),
                     "file_type": doc.file_type,
-                    "user_id": str(doc.user.id) # Important for filtering
+                    "user_id": str(doc.user.id)
                 }
             ))
 
