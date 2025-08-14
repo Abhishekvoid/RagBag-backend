@@ -104,7 +104,8 @@ def generate_rag_response(query: str, user_id: str):
     return chat_completion.choices[0].message.content
 
 class RegisterAPIView(APIView):
-    throttle_classes = [UserRateThrottle]  # Rate limiting
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [UserRateThrottle]  
     
     def post(self, request, *args, **kwargs):
         try:

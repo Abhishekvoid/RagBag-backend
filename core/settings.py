@@ -280,6 +280,9 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+ASGI_APPLICATION = "core.asgi.application"
+
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
 SECRET_KEY = os.getenv('SECRET_KEY')
@@ -294,6 +297,9 @@ ALLOWED_HOSTS = [
 
 # Application definition
 INSTALLED_APPS = [
+
+      
+
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -311,8 +317,8 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'djoser',
-    'channels',
     'storages', # The django-storages app
+    'channels',
     'accounts',
 ]
 
@@ -331,6 +337,16 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'core.urls'
 
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
+
+
 CORS_ALLOWED_ORIGINS = [
     origin.strip() 
     for origin in os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
@@ -343,9 +359,7 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-    # ✅ THIS IS THE CRITICAL FIX
-    # This sets the default security rule for your entire API.
-    # It says that a user MUST be authenticated to access any endpoint.
+   
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
@@ -395,6 +409,22 @@ DATABASES = {
     }
 }
 
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
 # Corrected Logging Configuration
 LOGGING = {
     'version': 1,
@@ -436,8 +466,12 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# ✅ We have removed MEDIA_ROOT to prevent local saving.
-# MEDIA_URL is now set in the Supabase block above.
+
 
 LOGIN_REDIRECT_URL = '/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
