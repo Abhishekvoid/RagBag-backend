@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
@@ -17,6 +17,7 @@ import google.generativeai as genai
 from groq import Groq
 from .tasks import process_document_ingestion, create_chapter_from_document
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.pagination import PageNumberPagination
 
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,8 @@ def generate_rag_response(query: str, user_id: str):
     )
     
     return chat_completion.choices[0].message.content
+
+
 
 class RegisterAPIView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -238,6 +241,10 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Document.objects.filter(user=self.request.user)
 
 # ------------- chapter ------------
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 25  # How many messages to send per page
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 class ChapterListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
@@ -268,6 +275,30 @@ class ChapterListCreateView(generics.ListCreateAPIView):
         headers = self.get_success_headers(read_serializer.data)
         return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
+
+class ChapterDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
+
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return ChapterWriteSerializer
+        return ChapterReadSerializer
+
+    def get_queryset(self):
+        return Chapter.objects.filter(user=self.request.user)
+    
+class ChapterMessageListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChatMessageSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        chapter_id = self.kwargs['chapter_id']
+        return ChatMessage.objects.filter(
+            session__chapter_id=chapter_id,
+            session__user=self.request.user
+        ).order_by('-created_at')
 # ---------  chatmessage ---------------
 class ChatMessageView(APIView):
     permission_classes = [IsAuthenticated]
@@ -334,3 +365,51 @@ class ChatSessionRetriveView(generics.RetrieveAPIView):
         return ChatSession.objects.filter(user=self.request.user)
 
         
+class RAGChatMessageView(APIView):
+    permissions = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = RAGChatMessageSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        validated_data = serializer.validated_data
+        user = request.user
+        chapter_Id = validated_data['chapter_Id']
+        user_query = validated_data['text']
+
+
+        session, _ =  ChatSession.objects.get_or_create(
+            user= user,
+            chapter_Id =chapter_Id,
+            defaults={'title': f"chat for chapter{chapter_Id}"}
+        )
+
+
+        ChatMessage.objects.create(session=session, sender='user', text=user_query)
+
+        try:
+            # 3. Call your RAG pipeline
+            ai_text_response = generate_rag_response(
+                query=user_query, 
+                user_id=user.id
+            )
+
+            # 4. Save the AI's response
+            ai_message = ChatMessage.objects.create(
+                session=session,
+                sender='ai',
+                text=ai_text_response
+            )
+            
+            # 5. Send the AI's response back to the frontend
+            response_data = {
+                "id": str(ai_message.id),
+                "sender": "ai",
+                "text": ai_message.text
+            }
+            return Response(response_data, status=status.HTTP_201_CREATED)
+        
+        except Exception as e:
+            logger.error(f"Error in RAG pipeline for user {user.id}: {e}", exc_info=True)
+            return Response({"error": "Failed to get AI response."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
