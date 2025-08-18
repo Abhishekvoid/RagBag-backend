@@ -126,3 +126,9 @@ class ChatMessageSerializer(serializers.ModelSerializer):
 
         fields = ['id', 'session', 'sender', 'text', 'created_at', 'citations', 'tokens', 'error']
         read_only_fields = ['id', 'created_at', 'citations', 'tokens', 'error']
+
+
+class RAGChatMessageSerializer(serializers.Serializer):
+
+    chapter = serializers.UUIDField()
+    text = serializers.CharField()

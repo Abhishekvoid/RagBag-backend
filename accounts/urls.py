@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, DocumentListCreateView, DocumentDetailView
+from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageSerializer, RAGChatMessageView
 
 
 urlpatterns = [
@@ -15,10 +15,14 @@ urlpatterns = [
 
     # Chapter endpoints
     path('chapters/', ChapterListCreateView.as_view(), name='chapters-list-create'),
-    path('chapters/<uuid:id>/',ChapterListCreateView.as_view(), name='chapter-detail'),
+    path('chapters/<uuid:id>/',ChapterDetailView.as_view(), name='chapter-detail'),
+    path('chapters/<uuid:chapter_id>/messages/', ChapterMessageListView.as_view(), name='chapter-messages-list'),
 
     # Document endpoints
     path('documents/', DocumentListCreateView.as_view(), name='documents-list-create'),
     path('documents/<uuid:id>/', DocumentDetailView.as_view(), name='document-detail'),
+
+
+    path('rag-chat/', RAGChatMessageView.as_view(), name='rag-chat'),
 ]
 
