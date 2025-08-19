@@ -28,53 +28,7 @@ class RegisterSerializers(BaseUserCreateSerializer):
         return super().validate(attrs)
 
 
-# ------------ chapter -----------------
 
-class ChapterWriteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Chapter
-        # The user will provide the parent subject's UUID, the name, and the order.
-        fields = ['subject', 'name', 'order']
-
-    extra_kwargs = {
-        'subject': {'required': False, 'allow_null': True}
-    }
-    def validate_subject(self, value):
-        """
-        Check that the subject is owned by the user making the request.
-        """
-        if value is None:
-            return value
-        
-        request = self.context.get('request')
-        if value.user != request.user:
-            raise serializers.ValidationError("You do not have permission to add a chapter to this subject.")
-        return value
-
-class ChapterReadSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Chapter
-        fields = ['id', 'subject', 'name', 'order', 'created_at', 'updated_at']
-
-# ------------- subject ------------
-class SubjectReadSerializer(serializers.ModelSerializer):
-    # This is the key: It uses the ChapterReadSerializer to nest the chapter data.
-    chapters = ChapterReadSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = Subject
-        fields = ['id', 'user', 'name', 'description', 'created_at', 'updated_at', 'chapters']
-
-class SubjectWriteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Subject
-        fields = ['name', 'description']
-
-    
-    def validate_name(self, value):
-        if not value.strip():
-            raise serializers.ValidationError("Subject name can't be blank.")
-        return value
 
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -109,6 +63,56 @@ class DocumentSerializer(serializers.ModelSerializer):
                 validated_data['title'] = file.name.rsplit('.', 1)[0]
         
         return super().create(validated_data)
+# ------------ chapter -----------------
+
+class ChapterWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Chapter
+        # The user will provide the parent subject's UUID, the name, and the order.
+        fields = ['subject', 'name', 'order']
+
+    extra_kwargs = {
+        'subject': {'required': False, 'allow_null': True}
+    }
+    def validate_subject(self, value):
+        """
+        Check that the subject is owned by the user making the request.
+        """
+        if value is None:
+            return value
+        
+        request = self.context.get('request')
+        if value.user != request.user:
+            raise serializers.ValidationError("You do not have permission to add a chapter to this subject.")
+        return value
+
+class ChapterReadSerializer(serializers.ModelSerializer):
+    documents = DocumentSerializer(many=True, read_only=True)
+    class Meta:
+        model = Chapter
+        fields = ['id', 'subject', 'name', 'order', 'created_at', 'updated_at', 'documents']
+
+# ------------- subject ------------
+class SubjectReadSerializer(serializers.ModelSerializer):
+    # This is the key: It uses the ChapterReadSerializer to nest the chapter data.
+    chapters = ChapterReadSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Subject
+        fields = ['id', 'user', 'name', 'description', 'created_at', 'updated_at', 'chapters']
+
+class SubjectWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ['name', 'description']
+
+    
+    def validate_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Subject name can't be blank.")
+        return value
+
+
 
 class ChatSessionSerializer(serializers.ModelSerializer):
 
