@@ -28,7 +28,7 @@ QDRANT_COLLECTION_NAME = "studywise_documents"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 EMBEDDING_MODEL = "text-embedding-004"
-LLM_MODEL = "mixtral-8x7b-32768" 
+LLM_MODEL = "llama3-70b-8192"
 
 
 try: 
@@ -46,47 +46,48 @@ except Exception as e:
     groq_client = None
     qdrant_client = None
 
-def generate_rag_response(query: str, user_id: str):
+def generate_rag_response(query: str, user_id: str, chapter_id: str):
     """
-    Performs the full RAG pipeline: embed, retrieve, augment, and generate.
+    Performs the full RAG pipeline, now scoped to a specific chapter.
     """
     if not qdrant_client or not groq_client:
         raise Exception("AI clients are not initialized.")
 
-    # 1. EMBED: Convert the user's question into a vector.
-    logger.info(f"Embedding query for user {user_id}: '{query[:50]}...'")
+    # 1. EMBED
+    logger.info(f"Embedding query for user {user_id} in chapter {chapter_id}: '{query[:50]}...'")
     query_embedding = genai.embed_content(
         model=f"models/{EMBEDDING_MODEL}",
         content=query,
-        task_type="RETRIEVAL_QUERY" # Use 'RETRIEVAL_QUERY' for search
+        task_type="RETRIEVAL_QUERY"
     )['embedding']
 
-    # 2. RETRIEVE: Search Qdrant for the most relevant text chunks.
+    # 2. RETRIEVE
     logger.info("Searching Qdrant for relevant context...")
     search_results = qdrant_client.search(
         collection_name=QDRANT_COLLECTION_NAME,
         query_vector=query_embedding,
-        limit=3, # Get the top 3 most relevant chunks
-        # CRITICAL: Filter results to only include documents owned by the current user.
+        limit=5, # Get more context now that it's chapter-specific
+        # ✅ CRITICAL IMPROVEMENT: Filter by user_id AND chapter_id
         query_filter=models.Filter(
             must=[
                 models.FieldCondition(
                     key="user_id",
                     match=models.MatchValue(value=str(user_id))
+                ),
+                models.FieldCondition(
+                    key="chapter_id",
+                    match=models.MatchValue(value=str(chapter_id))
                 )
             ]
         )
     )
     
     context = "\n\n---\n\n".join([result.payload['text'] for result in search_results])
-    logger.info(f"Retrieved context: {context[:200]}...")
-
-    # 3. AUGMENT: Create a detailed prompt for the LLM.
+    # ... (rest of the function is the same) ...
     prompt = f"""
-    You are an expert academic assistant named StudyWise. Your goal is to help the user understand their documents.
+    You are an expert academic assistant named StudyWise. Your goal is to help the user understand their documents for the current chapter.
     Based *only* on the context provided below, answer the user's question.
     If the context does not contain the answer, state that you cannot answer based on the provided information.
-    Do not use any external knowledge.
 
     CONTEXT:
     {context}
@@ -366,43 +367,51 @@ class ChatSessionRetriveView(generics.RetrieveAPIView):
 
         
 class RAGChatMessageView(APIView):
-    permissions = [IsAuthenticated]
+    # FIX #1: The correct attribute name is 'permission_classes'
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         serializer = RAGChatMessageSerializer(data=request.data)
         if not serializer.is_valid():
+            logger.error(f"❌ RAG chat serializer validation failed: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         validated_data = serializer.validated_data
         user = request.user
-        chapter_Id = validated_data['chapter_Id']
+        
+        # FIX #2: Use the correct key 'chapter' from the serializer
+        chapter_id = validated_data['chapter']
         user_query = validated_data['text']
+        
+        logger.info(f"✅ RAG chat request validated for chapter: {chapter_id}")
 
-
-        session, _ =  ChatSession.objects.get_or_create(
-            user= user,
-            chapter_Id =chapter_Id,
-            defaults={'title': f"chat for chapter{chapter_Id}"}
+        # Get or create a chat session for this specific chapter
+        session, _ = ChatSession.objects.get_or_create(
+            user=user,
+            # FIX #3: The model field is 'chapter', not 'chapter_Id'
+            chapter_id=chapter_id,
+            defaults={'title': f"Chat for chapter {chapter_id}"}
         )
 
-
+        # Save the user's message
         ChatMessage.objects.create(session=session, sender='user', text=user_query)
 
         try:
-            # 3. Call your RAG pipeline
+            # Call the improved RAG function with the chapter_id
             ai_text_response = generate_rag_response(
                 query=user_query, 
-                user_id=user.id
+                user_id=user.id,
+                chapter_id=str(chapter_id) # Pass chapter_id for scoped search
             )
 
-            # 4. Save the AI's response
+            # Save the AI's response
             ai_message = ChatMessage.objects.create(
                 session=session,
                 sender='ai',
                 text=ai_text_response
             )
             
-            # 5. Send the AI's response back to the frontend
+            # Send the AI's response back to the frontend
             response_data = {
                 "id": str(ai_message.id),
                 "sender": "ai",
@@ -411,5 +420,5 @@ class RAGChatMessageView(APIView):
             return Response(response_data, status=status.HTTP_201_CREATED)
         
         except Exception as e:
-            logger.error(f"Error in RAG pipeline for user {user.id}: {e}", exc_info=True)
+            logger.error(f"Error in RAG pipeline for user {user.id}, chapter {chapter_id}: {e}", exc_info=True)
             return Response({"error": "Failed to get AI response."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
