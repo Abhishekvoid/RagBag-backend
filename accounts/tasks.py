@@ -216,20 +216,84 @@ def process_document_ingestion(self, document_id: str):
                 vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
             )
 
+        # points_batch = []
+        # for chunk, vector in zip(text_chunks, all_embeddings):
+        #     points_batch.append(PointStruct(
+        #         # ✅ THE FIX: Generate a new, valid UUID for each point
+        #         id=str(uuid.uuid4()),
+        #         vector=vector,
+        #         payload={
+        #             "text": chunk,
+        #             "document_id": str(document_id),
+        #             "file_type": doc.file_type,
+        #             "user_id": str(doc.user.id)
+        #         }
+
+        #         if doc.chapter:
+        #             payload["chapter_id"] = str(doc.chapter.id)
+
+        #         points_batch.append(PointStruct(
+        #             id=str(uuid.uuid4()),
+        #             vector=vector,
+        #             payload=payload
+        #     ))
+
+        #     payload = {
+        #         "text" = chunk,
+        #         "document_id" = str(document_id),
+        #         "file_type" = doc.file_type,
+        #         "user_id" = str(doc.user.id)
+        #     }
+
+        #     if doc.chapter:
+        #         payload["chapter_id"] = str(doc.chapter.id)
+
+        #     point = PointStruct (
+        #         id = str(uuid.uuid4()),
+        #         vector = vector,
+        #         payload  = payload,
+        #     )
+
+        #     points_batch.append(point)
+
+        #     if len(points_batch) >= BATCH_SIZE:
+        #         qdrant_client.upsert(
+        #             collection_name=QDRANT_COLLECTION_NAME,
+        #             points=points_batch,
+        #             wait=True
+        #         )
+        #         points_batch = []
+        
+        # if points_batch:
+        #     qdrant_client.upsert(
+        #         collection_name=QDRANT_COLLECTION_NAME,
+        #         points=points_batch,
+        #         wait=True
+        #     )
+
         points_batch = []
         for chunk, vector in zip(text_chunks, all_embeddings):
-            points_batch.append(PointStruct(
-                # ✅ THE FIX: Generate a new, valid UUID for each point
+           
+            payload = {
+                "text": chunk,
+                "document_id": str(document_id),
+                "file_type": doc.file_type,
+                "user_id": str(doc.user.id)
+            }
+            
+            
+            if doc.chapter:
+                payload["chapter_id"] = str(doc.chapter.id)
+
+          
+            point = PointStruct(
                 id=str(uuid.uuid4()),
                 vector=vector,
-                payload={
-                    "text": chunk,
-                    "document_id": str(document_id),
-                    "file_type": doc.file_type,
-                    "user_id": str(doc.user.id)
-                }
-            ))
+                payload=payload
+            )
+            points_batch.append(point)
 
+          
             if len(points_batch) >= BATCH_SIZE:
                 qdrant_client.upsert(
                     collection_name=QDRANT_COLLECTION_NAME,
