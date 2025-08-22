@@ -35,10 +35,10 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = Document
         fields = [
             "id", "chapter", "user", "title", "file", "file_type", 
-            "size_bytes", "created_at", "updated_at"
+            "size_bytes", "status", "error_message", "created_at", "updated_at"
         ]
         # Make 'title' and 'chapter' optional in the API
-        read_only_fields = ("user", "file_type", "size_bytes", "created_at", "updated_at")
+        read_only_fields = ("user", "file_type", "size_bytes","status", "error_message", "created_at", "updated_at")
         extra_kwargs = {
             'title': {'required': False},
             'chapter': {'required': False, 'allow_null': True}

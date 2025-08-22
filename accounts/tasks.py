@@ -59,6 +59,7 @@ def _initialize_google_ai():
 # ---- HELPER FUNCTIONS -------
 
 def get_text_from_file(document_path, file_type):
+    # ... (this function remains the same) ...
     """
     Extracts text from a file, with detailed logging for debugging.
     """
@@ -114,6 +115,7 @@ def get_text_from_file(document_path, file_type):
     return text
 
 def chunk_text_by_token(text, tokenizer, chunk_size=384, chunk_overlap=50):
+    # ... (this function remains the same) ...
     if not text or not tokenizer: return []
     tokens = tokenizer.encode(text)
     chunks = []
@@ -126,18 +128,19 @@ def chunk_text_by_token(text, tokenizer, chunk_size=384, chunk_overlap=50):
         start += chunk_size - chunk_overlap
     return chunks
 
-# ----- NEW "SMART CHAPTER" TASK -----
+# ----- CORRECTED "SMART CHAPTER" TASK -----
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def create_chapter_from_document(self, document_id: str):
     logger.info(f"[{document_id}] Starting smart chapter creation...")
-    doc = None
+    doc = Document.objects.get(id=document_id)
+
+    # --- NEW: Set status to PROCESSING immediately ---
+    doc.status = Document.STATUS_PROCESSING
+    doc.save(update_fields=['status'])
+
     try:
         _, _, groq_client = _get_clients()
         _initialize_google_ai()
-
-        doc = Document.objects.get(id=document_id)
-        doc.status = "PROCESSING"
-        doc.save()
 
         document_text = get_text_from_file(doc.file.name, doc.file_type)
         if not document_text:
@@ -156,40 +159,47 @@ def create_chapter_from_document(self, document_id: str):
         doc.title = ai_generated_title
         doc.save()
 
-        logger.info(f"Broadcasting notebook update to user {doc.user.id}")
+        # --- NEW: Send a success notification ---
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
-            f"user_{doc.user.id}",  # Send to a group specific to this user
-            {
-                "type": "send_notification",
-                "message": "notebook_updated"
-            }
+            f"user_{doc.user.id}",
+            {"type": "send_notification", "message": "notebook_updated"}
         )
 
+        # Trigger the ingestion task with the document ID
         process_document_ingestion.delay(str(doc.id))
 
-        logger.info(f"[{document_id}] Successfully created chapter '{ai_generated_title}'")
+        logger.info(f"[{document_id}] Successfully created chapter '{ai_generated_title}' and triggered ingestion.")
+
     except Exception as e:
-        logger.error(f"[{document_id}] Smart chapter creation failed: {e}", exc_info=True)
-        if doc:
-            doc.status = 'FAILED'
-            doc.save()
+        logger.error(f"[{document_id}] Chapter creation or ingestion trigger failed: {e}", exc_info=True)
+        # --- NEW: On failure, update status and save error ---
+        doc.status = Document.STATUS_FAILED
+        doc.error_message = str(e)
+        doc.save(update_fields=['status', 'error_message'])
+        # You can optionally send a failure notification here
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{doc.user.id}",
+            {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
+        )
         raise self.retry(exc=e)
 
-# ----- ORIGINAL DOCUMENT PROCESSING TASK --------
-
+# ----- CORRECTED DOCUMENT PROCESSING TASK --------
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def process_document_ingestion(self, document_id: str):
     logger.info(f"[{document_id}] Starting document ingestion for RAG...")
-    doc = None
+    doc = Document.objects.get(id=document_id)
+    
     try:
         qdrant_client, tokenizer, _ = _get_clients()
         _initialize_google_ai()
         
-        doc = Document.objects.get(id=document_id)
+        # --- NEW: Text extraction happens here first and is saved to the database. ---
         if not doc.extracted_text:
             logger.info(f"[{document_id}] Extracting text for ingestion...")
             doc.extracted_text = get_text_from_file(doc.file.name, doc.file_type)
+            # We save the text to the database to avoid redundant extraction.
             doc.save(update_fields=['extracted_text'])
 
         if not doc.extracted_text.strip():
@@ -216,84 +226,24 @@ def process_document_ingestion(self, document_id: str):
                 vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
             )
 
-        # points_batch = []
-        # for chunk, vector in zip(text_chunks, all_embeddings):
-        #     points_batch.append(PointStruct(
-        #         # ✅ THE FIX: Generate a new, valid UUID for each point
-        #         id=str(uuid.uuid4()),
-        #         vector=vector,
-        #         payload={
-        #             "text": chunk,
-        #             "document_id": str(document_id),
-        #             "file_type": doc.file_type,
-        #             "user_id": str(doc.user.id)
-        #         }
-
-        #         if doc.chapter:
-        #             payload["chapter_id"] = str(doc.chapter.id)
-
-        #         points_batch.append(PointStruct(
-        #             id=str(uuid.uuid4()),
-        #             vector=vector,
-        #             payload=payload
-        #     ))
-
-        #     payload = {
-        #         "text" = chunk,
-        #         "document_id" = str(document_id),
-        #         "file_type" = doc.file_type,
-        #         "user_id" = str(doc.user.id)
-        #     }
-
-        #     if doc.chapter:
-        #         payload["chapter_id"] = str(doc.chapter.id)
-
-        #     point = PointStruct (
-        #         id = str(uuid.uuid4()),
-        #         vector = vector,
-        #         payload  = payload,
-        #     )
-
-        #     points_batch.append(point)
-
-        #     if len(points_batch) >= BATCH_SIZE:
-        #         qdrant_client.upsert(
-        #             collection_name=QDRANT_COLLECTION_NAME,
-        #             points=points_batch,
-        #             wait=True
-        #         )
-        #         points_batch = []
-        
-        # if points_batch:
-        #     qdrant_client.upsert(
-        #         collection_name=QDRANT_COLLECTION_NAME,
-        #         points=points_batch,
-        #         wait=True
-        #     )
-
         points_batch = []
         for chunk, vector in zip(text_chunks, all_embeddings):
-           
             payload = {
                 "text": chunk,
                 "document_id": str(document_id),
                 "file_type": doc.file_type,
                 "user_id": str(doc.user.id)
             }
-            
-            
             if doc.chapter:
                 payload["chapter_id"] = str(doc.chapter.id)
-
-          
+            
             point = PointStruct(
                 id=str(uuid.uuid4()),
                 vector=vector,
                 payload=payload
             )
             points_batch.append(point)
-
-          
+            
             if len(points_batch) >= BATCH_SIZE:
                 qdrant_client.upsert(
                     collection_name=QDRANT_COLLECTION_NAME,
@@ -309,14 +259,31 @@ def process_document_ingestion(self, document_id: str):
                 wait=True
             )
             
-        doc.status = 'COMPLETED'
-        doc.save(update_fields=['status'])
+        # --- NEW: On success, mark as COMPLETED ---
+        doc.status = Document.STATUS_COMPLETED
+        doc.error_message = None  # Clear any previous errors
+        doc.save(update_fields=['status', 'error_message'])
+        
         logger.info(f"[{document_id}] Ingestion successful.")
-    except Document.DoesNotExist:
-        logger.error(f"[{document_id}] Document not found.")
+
+        # --- NEW: Send a success notification ---
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{doc.user.id}",
+            {"type": "send_notification", "message": "document_ready", "document_id": str(doc.id)}
+        )
+
     except Exception as e:
         logger.error(f"[{document_id}] Ingestion failed: {e}", exc_info=True)
-        if doc:
-            doc.status = 'FAILED'
-            doc.save(update_fields=['status'])
+        # --- NEW: On failure, update status and save error ---
+        doc.status = Document.STATUS_FAILED
+        doc.error_message = str(e)
+        doc.save(update_fields=['status', 'error_message'])
+        
+        # --- NEW: Send a failure notification ---
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{doc.user.id}",
+            {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
+        )
         raise self.retry(exc=e)
