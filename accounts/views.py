@@ -1,3 +1,6 @@
+import asyncio
+from asgiref.sync import async_to_sync
+from qdrant_client.http.exceptions import UnexpectedResponse
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -12,9 +15,9 @@ from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter
 import os
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient, models
+from qdrant_client import QdrantClient, models, AsyncQdrantClient
 import google.generativeai as genai
-from groq import Groq
+from groq import Groq, AsyncGroq
 from .tasks import process_document_ingestion, create_chapter_from_document
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.pagination import PageNumberPagination
@@ -29,6 +32,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 EMBEDDING_MODEL = "text-embedding-004"
 LLM_MODEL = "llama3-70b-8192"
+
 
 
 try: 
@@ -46,49 +50,133 @@ except Exception as e:
     groq_client = None
     qdrant_client = None
 
-def generate_rag_response(query: str, user_id: str, chapter_id: str):
+async_qdrant_client = AsyncQdrantClient(QDRANT_URL)
+async_groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+
+
+async def expand_queries_async(query: str, num: int = 4) -> list[str]:
+    expansion_prompt = f"Generate {num} alternative phrasings of the following query for retrieval:\n\n{query}"
+    # You must `await` the async client call.
+    completion = await async_groq_client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": expansion_prompt}]
+    )
+    expanded = completion.choices[0].message.content.strip().split("\n")
+    return [q.strip("-• ") for q in expanded if q.strip()]
+
+async def generate_rag_response(query: str, user_id: str, chapter_id: str):
     """
     Performs the full RAG pipeline, now scoped to a specific chapter.
     """
-    if not qdrant_client or not groq_client:
-        raise Exception("AI clients are not initialized.")
 
-    # 1. EMBED
-    logger.info(f"Embedding query for user {user_id} in chapter {chapter_id}: '{query[:50]}...'")
-    query_embedding = genai.embed_content(
-        model=f"models/{EMBEDDING_MODEL}",
-        content=query,
-        task_type="RETRIEVAL_QUERY"
-    )['embedding']
 
-    # 2. RETRIEVE
-    logger.info("Searching Qdrant for relevant context...")
-    search_results = qdrant_client.search(
-        collection_name=QDRANT_COLLECTION_NAME,
-        query_vector=query_embedding,
-        limit=5, # Get more context now that it's chapter-specific
-        # ✅ CRITICAL IMPROVEMENT: Filter by user_id AND chapter_id
-        query_filter=models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="user_id",
-                    match=models.MatchValue(value=str(user_id))
-                ),
-                models.FieldCondition(
-                    key="chapter_id",
-                    match=models.MatchValue(value=str(chapter_id))
-                )
-            ]
+    try:
+        count_result = await async_qdrant_client.count(
+            collection_name=QDRANT_COLLECTION_NAME,
+            count_filter=models.Filter(
+                must=[models.FieldCondition(key="chapter_id", match=models.MatchValue(value=str(chapter_id)))]
+            ),
+            exact=False
         )
-    )
-    
-    context = "\n\n---\n\n".join([result.payload['text'] for result in search_results])
-    # ... (rest of the function is the same) ...
-    prompt = f"""
-    You are an expert academic assistant named StudyWise. Your goal is to help the user understand their documents for the current chapter.
-    Based *only* on the context provided below, answer the user's question.
-    If the context does not contain the answer, state that you cannot answer based on the provided information.
+        if count_result.count == 0:
+            logger.warning(f"SELF-HEALING: No vectors found for COMPLETED chapter {chapter_id}. Triggering re-ingestion.")
+            try:
+                doc_to_reingest = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
+                process_document_ingestion.delay(str(doc_to_reingest.id))
+                return "The data for this chapter is being refreshed. Please try your question again in a minute."
+            except Document.DoesNotExist:
+                return "Sorry, the source document for this chapter could not be found. Please re-upload it."
+    except UnexpectedResponse as e:
+        if e.status_code == 404:
+            logger.warning(f"SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter {chapter_id}.")
+            try:
+                doc_to_reingest = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
+                process_document_ingestion.delay(str(doc_to_reingest.id))
+                return "The workspace is being initialized. Please try your question again in a minute."
+            except Document.DoesNotExist:
+                return "Sorry, the source document for this chapter could not be found. Please re-upload it."
+        else:
+            raise e
+    expanded_queries = await expand_queries_async(query, num=4)
+    all_queries = [query] + expanded_queries
 
+    logger.info(f"Batch Embedding{len(all_queries)} queries...")
+    embedding_response = await asyncio.to_thread(
+        genai.embed_content,
+        model=f"models/{EMBEDDING_MODEL}",
+        content=all_queries,
+        task_type="RETRIEVAL_QUERY"
+    )
+    all_embeddings = embedding_response['embedding']
+
+    search_filter = models.Filter (
+        must = [
+            models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
+            models.FieldCondition(key="chapter_id", match=models.MatchValue(value=str(chapter_id)))
+        ]
+    )
+
+    search_requests = [
+        models.SearchRequest(vector=vector, filter=search_filter, limit=5)
+        for vector in all_embeddings
+    ]
+
+
+    logger.info(f"Batch searching Qdrant with {len(search_requests)} requests...")
+    try :
+        all_search_results = await async_qdrant_client.search_batch(
+            collection_name= QDRANT_COLLECTION_NAME,
+            requests=search_requests
+        )
+    except UnexpectedResponse as e:
+        if e.status_code == 404:
+            # Handle the specific 404 error gracefully
+            return "Sorry, the data for this chapter is missing. Please re-upload the source document to enable chat."
+        else:
+            # Re-raise any other unexpected error
+            raise e
+
+    flat_results = [result for sublist in all_search_results for result in sublist]
+   
+    seen = set()
+    unique_results = []
+   
+    for r in flat_results:
+        if r.payload['text'] not in seen:
+            seen.add(r.payload['text'])
+            unique_results.append(r)
+
+    sorted_results = sorted(unique_results, key=lambda r: r.score, reverse=True)
+    context = "\n\n---\n\n".join([r.payload['text'] for r in sorted_results[:10]])
+    
+    prompt = f"""
+    You are StudyWise, an expert academic assistant modeled after the intellectual rigor of a world-class professor (MIT, IIT, IIM). Your purpose is to deliver responses that demonstrate deep expertise, critical reasoning, and pedagogical clarity.
+
+    Core Directives:
+
+    - Primary Goal: Rely first and foremost on the "Provided Context" (retrieved knowledge base). Use it as the authoritative source for your answer.
+
+    - Scholarly Depth: Present responses with the intellectual rigor of a PhD-level academic. Use advanced reasoning, nuanced arguments, and where applicable, reference relevant theories, methodologies, or frameworks.
+
+    - Pedagogical Style: Write as if you are teaching advanced graduate students — precise yet clear, breaking down complex concepts step by step.
+
+    - Critical Analysis: If the context contains gaps, ambiguities, or biases, highlight them explicitly. Offer multiple perspectives when appropriate.
+
+    - Enrichment: If deeper elaboration is required beyond the context, clearly mark it as [Extended Knowledge]. This additional knowledge should be relevant, accurate, and enrich understanding without contradicting the context.
+
+    Structure & Presentation:
+
+    - Begin with a Concise Executive Summary (2–3 sentences).
+
+    - Follow with Well-Structured Sections (with headings, subheadings, and bullet points).
+
+    - Use emphasis (bold/italics) and examples for clarity.
+
+    - Where useful, integrate diagrams, tables, or equations (LaTeX) to strengthen explanation.
+
+    - Tone & Voice: Maintain an authoritative yet approachable tone — the voice of a highly intelligent professor who is rigorous, insightful, and encouraging.
+
+    Final Touch: Conclude with a Key Takeaway or Next Steps for Deeper Study.
     CONTEXT:
     {context}
 
@@ -98,7 +186,7 @@ def generate_rag_response(query: str, user_id: str, chapter_id: str):
     ANSWER:
     """
     logger.info("Generating final answer with Groq...")
-    chat_completion = groq_client.chat.completions.create(
+    chat_completion = await async_groq_client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
         model=LLM_MODEL,
     )
@@ -317,7 +405,7 @@ class ChatMessageView(APIView):
 
         try:
             # 2. Call our RAG pipeline to get the AI's response.
-            ai_text_response = generate_rag_response(
+            ai_text_response = async_to_sync(generate_rag_response)(
                 query=user_message.text, 
                 user_id=request.user.id
             )
@@ -384,22 +472,44 @@ class RAGChatMessageView(APIView):
         chapter_id = validated_data['chapter']
         user_query = validated_data['text']
         
-        logger.info(f"✅ RAG chat request validated for chapter: {chapter_id}")
+        # logger.info(f"✅ RAG chat request validated for chapter: {chapter_id}")
 
-        # Get or create a chat session for this specific chapter
+        # # Get or create a chat session for this specific chapter
+        # session, _ = ChatSession.objects.get_or_create(
+        #     user=user,
+        #     # FIX #3: The model field is 'chapter', not 'chapter_Id'
+        #     chapter_id=chapter_id,
+        #     defaults={'title': f"Chat for chapter {chapter_id}"}
+        # )
+
+        # # Save the user's message
+        # ChatMessage.objects.create(session=session, sender='user', text=user_query)
+        try:
+            document = Document.objects.get(chapter__id=chapter_id, user=user)
+            if document.status != Document.STATUS_COMPLETED:
+                error_msg = f"This document is not ready for chat. Current status: {document.status}."
+                if document.status == Document.STATUS_FAILED:
+                    error_msg += f" Error details: {document.error_message}"
+                
+                return Response(
+                    {"error": error_msg},
+                    status=status.HTTP_409_CONFLICT # 409 Conflict is a good code for this
+                )
+        except Document.DoesNotExist:
+            return Response({"error": "Document not found for this chapter."}, status=status.HTTP_404_NOT_FOUND)
+        # --- END OF SAFETY GATE ---
+        
         session, _ = ChatSession.objects.get_or_create(
             user=user,
-            # FIX #3: The model field is 'chapter', not 'chapter_Id'
             chapter_id=chapter_id,
             defaults={'title': f"Chat for chapter {chapter_id}"}
         )
 
-        # Save the user's message
         ChatMessage.objects.create(session=session, sender='user', text=user_query)
 
         try:
             # Call the improved RAG function with the chapter_id
-            ai_text_response = generate_rag_response(
+            ai_text_response = async_to_sync(generate_rag_response)(
                 query=user_query, 
                 user_id=user.id,
                 chapter_id=str(chapter_id) # Pass chapter_id for scoped search
