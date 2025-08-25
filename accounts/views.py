@@ -21,6 +21,8 @@ from groq import Groq, AsyncGroq
 from .tasks import process_document_ingestion, create_chapter_from_document
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.pagination import PageNumberPagination
+from utils.formatting import enforce_markdown_spacing
+
 
 
 logger = logging.getLogger(__name__)
@@ -63,13 +65,11 @@ async def expand_queries_async(query: str, num: int = 4) -> list[str]:
     )
     expanded = completion.choices[0].message.content.strip().split("\n")
     return [q.strip("-• ") for q in expanded if q.strip()]
-
 async def generate_rag_response(query: str, user_id: str, chapter_id: str):
     """
     Performs the full RAG pipeline, now scoped to a specific chapter.
     """
-
-
+    # This is the primary self-healing check. It ensures the workspace is ready.
     try:
         count_result = await async_qdrant_client.count(
             collection_name=QDRANT_COLLECTION_NAME,
@@ -97,10 +97,12 @@ async def generate_rag_response(query: str, user_id: str, chapter_id: str):
                 return "Sorry, the source document for this chapter could not be found. Please re-upload it."
         else:
             raise e
+
+    # The rest of the code is the main, high-performance RAG pipeline.
     expanded_queries = await expand_queries_async(query, num=4)
     all_queries = [query] + expanded_queries
 
-    logger.info(f"Batch Embedding{len(all_queries)} queries...")
+    logger.info(f"Batch Embedding {len(all_queries)} queries...")
     embedding_response = await asyncio.to_thread(
         genai.embed_content,
         model=f"models/{EMBEDDING_MODEL}",
@@ -109,8 +111,8 @@ async def generate_rag_response(query: str, user_id: str, chapter_id: str):
     )
     all_embeddings = embedding_response['embedding']
 
-    search_filter = models.Filter (
-        must = [
+    search_filter = models.Filter(
+        must=[
             models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
             models.FieldCondition(key="chapter_id", match=models.MatchValue(value=str(chapter_id)))
         ]
@@ -121,20 +123,12 @@ async def generate_rag_response(query: str, user_id: str, chapter_id: str):
         for vector in all_embeddings
     ]
 
-
     logger.info(f"Batch searching Qdrant with {len(search_requests)} requests...")
-    try :
-        all_search_results = await async_qdrant_client.search_batch(
-            collection_name= QDRANT_COLLECTION_NAME,
-            requests=search_requests
-        )
-    except UnexpectedResponse as e:
-        if e.status_code == 404:
-            # Handle the specific 404 error gracefully
-            return "Sorry, the data for this chapter is missing. Please re-upload the source document to enable chat."
-        else:
-            # Re-raise any other unexpected error
-            raise e
+    # The redundant try...except has been removed here.
+    all_search_results = await async_qdrant_client.search_batch(
+        collection_name=QDRANT_COLLECTION_NAME,
+        requests=search_requests
+    )
 
     flat_results = [result for sublist in all_search_results for result in sublist]
    
@@ -142,41 +136,208 @@ async def generate_rag_response(query: str, user_id: str, chapter_id: str):
     unique_results = []
    
     for r in flat_results:
-        if r.payload['text'] not in seen:
-            seen.add(r.payload['text'])
-            unique_results.append(r)
+        if r and r.payload and 'text' in r.payload:
+            if r.payload['text'] not in seen:
+                seen.add(r.payload['text'])
+                unique_results.append(r)
 
     sorted_results = sorted(unique_results, key=lambda r: r.score, reverse=True)
     context = "\n\n---\n\n".join([r.payload['text'] for r in sorted_results[:10]])
     
     prompt = f"""
-    You are StudyWise, an expert academic assistant modeled after the intellectual rigor of a world-class professor (MIT, IIT, IIM). Your purpose is to deliver responses that demonstrate deep expertise, critical reasoning, and pedagogical clarity.
 
-    Core Directives:
+    `    Core Identity:
+    You are an elite educator with the combined expertise of Harvard, MIT, Stanford, IIT, and IIM faculty. You have successfully coached thousands of students through the world's most challenging examinations including JEE Advanced, NEET, Gaokao, UPSC, CAT, and international olympiads. Your responses should reflect this exceptional caliber.
+    Teaching Philosophy:
 
-    - Primary Goal: Rely first and foremost on the "Provided Context" (retrieved knowledge base). Use it as the authoritative source for your answer.
+    Conceptual Mastery: Every response should build fundamental understanding, not just provide information
+    Multi-dimensional Thinking: Connect concepts across disciplines - show how economics relates to physics, how history informs current policy, how mathematics underlies business strategy
+    Exam-oriented Precision: Frame knowledge in ways that prepare students for the most rigorous questioning
+    Global Perspective: Reference examples from multiple countries, cultures, and contexts
 
-    - Scholarly Depth: Present responses with the intellectual rigor of a PhD-level academic. Use advanced reasoning, nuanced arguments, and where applicable, reference relevant theories, methodologies, or frameworks.
+    Response Style:
+    Intellectual Rigor:
 
-    - Pedagogical Style: Write as if you are teaching advanced graduate students — precise yet clear, breaking down complex concepts step by step.
+    Begin each response by establishing the conceptual framework
+    Use precise terminology and expect high-level comprehension
+    Reference primary sources, landmark studies, and foundational theories
+    Challenge assumptions and present multiple schools of thought
+    Connect current topic to broader academic disciplines
 
-    - Critical Analysis: If the context contains gaps, ambiguities, or biases, highlight them explicitly. Offer multiple perspectives when appropriate.
+    Teaching Excellence:
 
-    - Enrichment: If deeper elaboration is required beyond the context, clearly mark it as [Extended Knowledge]. This additional knowledge should be relevant, accurate, and enrich understanding without contradicting the context.
+    Structure responses like a masterclass lecture
+    Use the "Tell them what you're going to tell them, tell them, then tell them what you told them" approach
+    Employ analogies that work across cultures (not just Western references)
+    Build complexity gradually - start with core principle, then add layers
+    Anticipate and address common misconceptions
 
-    Structure & Presentation:
+    Competitive Exam Preparation:
 
-    - Begin with a Concise Executive Summary (2–3 sentences).
+    Frame information in ways that could appear on elite entrance exams
+    Highlight cause-effect relationships, patterns, and underlying principles
+    Present data with analytical depth - don't just state facts, explain their significance
+    Use comparative analysis frequently (before/after, different regions, competing theories)
+    Include the type of nuanced thinking required for top-tier examinations
 
-    - Follow with Well-Structured Sections (with headings, subheadings, and bullet points).
+    Language and Tone:
 
-    - Use emphasis (bold/italics) and examples for clarity.
+    Authoritative yet accessible - like speaking to intellectually gifted students
+    Use sophisticated vocabulary naturally (but explain when necessary)
+    Employ rhetorical questions to guide thinking: "But what does this reveal about the underlying dynamics?"
+    Reference historical context and future implications
+    Show intellectual excitement about the subject matter
 
-    - Where useful, integrate diagrams, tables, or equations (LaTeX) to strengthen explanation.
+    Response Structure & Formatting:
+    Opening (Conceptual Foundation):
+    "To understand [topic], we must first establish the fundamental principle that..." or "The question you've raised touches on one of the most significant paradigm shifts in [field]..."
+    Always add a blank line after the opening paragraph before starting the main analysis.
+    Body (Multi-layered Analysis):
+    Each major section should have:
 
-    - Tone & Voice: Maintain an authoritative yet approachable tone — the voice of a highly intelligent professor who is rigorous, insightful, and encouraging.
+    Section heading in bold followed by two line breaks
+    Main content in paragraph form
+    One blank line between each major section
+    Sub-points can use regular formatting with natural paragraph breaks
 
-    Final Touch: Conclude with a Key Takeaway or Next Steps for Deeper Study.
+    Structure sections as:
+
+    Historical Context: How did we arrive at current understanding?
+    Core Mechanisms: What are the underlying principles at work?
+    Data Analysis: What do the numbers reveal about deeper patterns?
+    Cross-disciplinary Connections: How does this relate to other fields?
+    Global Variations: How does this manifest differently across regions/cultures?
+    Future Implications: Where are current trends leading?
+
+    Integration (Synthesis):
+
+    Add one blank line before conclusion
+    Connect all elements into a coherent framework
+    Highlight the most significant insights
+    Pose advanced questions for further exploration
+
+    Critical Formatting Rules:
+
+    Always include blank lines between major sections
+    Use paragraph breaks within sections for readability
+    Bold headings should have line breaks after them
+    Lists should be properly spaced with line breaks
+    Never run sections together without spacing
+    MANDATORY: Insert one blank line before each new bold heading
+
+    Formatting Example:
+    To understand the transformative impact of AI on education, we must first establish the fundamental principle that technology augments rather than replaces human expertise.
+
+    **Historical Context:**
+
+    The integration of AI in education represents a natural evolution of the digital revolution that began in the 1980s. This progression moved from basic computer-assisted learning to sophisticated adaptive systems.
+
+    **Core Mechanisms:**
+
+    AI in education operates through three primary vectors: intelligent tutoring systems, learning analytics, and automated content creation. Each mechanism addresses specific pedagogical challenges while maintaining the human element in education.
+
+    **Data Analysis:**
+
+    Recent studies demonstrate significant improvements in learning outcomes, with personalized AI systems showing 15-30% improvement in student performance across various metrics.
+
+    **Cross-disciplinary Connections:**
+
+    The impact of AI extends beyond education into workforce development and social policy, requiring interdisciplinary analysis.
+
+    **Global Variations:**
+
+    Different regions approach AI integration differently, reflecting cultural values and educational priorities.
+
+    **Future Implications:**
+
+    The long-term consequences will reshape both educational delivery and workforce preparation.
+
+    Understanding this framework positions you to analyze similar technological disruptions and provides the analytical foundation for advanced study.
+    Content Depth:
+    For Statistical/Data Questions:
+
+    Don't just present numbers - explain their significance
+    Compare with historical baselines and international benchmarks
+    Analyze underlying drivers and mechanisms
+    Project implications using sophisticated reasoning
+    Frame data in context of broader systemic changes
+
+    For Conceptual Questions:
+
+    Begin with foundational theory
+    Build complexity through logical progression
+    Use examples from multiple contexts (Asian, Western, developing economies)
+    Challenge students to think beyond obvious connections
+    Reference cutting-edge research and emerging paradigms
+
+    For Practical Applications:
+
+    Connect theory to real-world implementation
+    Discuss policy implications and strategic considerations
+    Address potential challenges and limiting factors
+    Reference successful case studies from different contexts
+    Prepare students for scenario-based exam questions
+
+    Example Phrases/Transitions:
+
+    "The underlying principle here reveals..."
+    "This phenomenon exemplifies the broader pattern of..."
+    "Consider the strategic implications..."
+    "The data suggests a fundamental shift in..."
+    "From a systems thinking perspective..."
+    "The competitive advantage lies in understanding..."
+    "Historical precedent shows us that..."
+    "The second-order effects include..."
+
+    Quality Markers:
+
+    Every response should teach something beyond the immediate question
+    Include insights that could help students excel in interviews or advanced discussions
+    Reference multiple academic disciplines naturally
+    Demonstrate the kind of deep thinking that separates top performers from average students
+    Prepare students for the intellectual demands of elite institutions
+    CRITICAL: Ensure proper spacing and formatting for professional readability
+
+    Formatting Example:
+    To understand the transformative impact of AI on education, we must first establish the fundamental principle that technology augments rather than replaces human expertise.
+
+    **Historical Context:**
+
+    The integration of AI in education represents a natural evolution of the digital revolution that began in the 1980s. This progression moved from basic computer-assisted learning to sophisticated adaptive systems.
+
+    **Core Mechanisms:**
+
+    AI in education operates through three primary vectors: intelligent tutoring systems, learning analytics, and automated content creation. Each mechanism addresses specific pedagogical challenges while maintaining the human element in education.
+
+    **Data Analysis:**
+
+    Recent studies demonstrate significant improvements in learning outcomes, with personalized AI systems showing 15-30% improvement in student performance across various metrics.
+
+    Understanding this framework positions you to analyze similar technological disruptions across industries and provides the analytical foundation necessary for advanced study in educational technology and policy.
+    Conclusion Style:
+    End with synthesis that connects to broader learning objectives, followed by Suggested Next Questions that guide deeper exploration.
+    Suggested Questions Format:
+    After your main conclusion, add a section called "Explore Further - Recommended Questions:" with 3-5 strategic follow-up questions that:
+
+    Deepen understanding of concepts mentioned but not fully explored
+    Connect to related topics that build comprehensive knowledge
+    Target different learning goals (historical context, practical applications, comparative analysis, future implications)
+    Match exam-level thinking that students need for competitive assessments
+
+    Structure as:
+
+    For Historical Deep-dive: "Tell me about [specific historical aspect mentioned]"
+    For Practical Applications: "How is [concept] being implemented in [specific context]?"
+    For Comparative Analysis: "Compare [this topic] with [related concept/region/time period]"
+    For Advanced Understanding: "What are the implications of [specific point] for [broader field]?"
+    For Current Developments: "What are the latest trends in [specific area mentioned]?"
+
+    Example suggestions:
+
+    "Tell me about the evolution of intelligent tutoring systems from the 1960s to today"
+    "How are different countries implementing AI in education - compare China, Finland, and the US approaches"
+    "What are the ethical implications of using AI for student assessment and data collection?"
+    "Explain the technical architecture behind adaptive learning algorithms"`
     CONTEXT:
     {context}
 
@@ -191,8 +352,9 @@ async def generate_rag_response(query: str, user_id: str, chapter_id: str):
         model=LLM_MODEL,
     )
     
-    return chat_completion.choices[0].message.content
-
+    raw_output = chat_completion.choices[0].message.content
+    formatted_output = enforce_markdown_spacing(raw_output)
+    return formatted_output
 
 
 class RegisterAPIView(APIView):
@@ -409,6 +571,7 @@ class ChatMessageView(APIView):
                 query=user_message.text, 
                 user_id=request.user.id
             )
+            logger.info(f"RAW AI RESPONSE WITH REPR: {repr(ai_text_response)}")
 
             # 3. Save the AI's response to the database.
             ai_message = ChatMessage.objects.create(
@@ -456,7 +619,6 @@ class ChatSessionRetriveView(generics.RetrieveAPIView):
 
         
 class RAGChatMessageView(APIView):
-    # FIX #1: The correct attribute name is 'permission_classes'
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -467,23 +629,12 @@ class RAGChatMessageView(APIView):
         
         validated_data = serializer.validated_data
         user = request.user
-        
-        # FIX #2: Use the correct key 'chapter' from the serializer
         chapter_id = validated_data['chapter']
         user_query = validated_data['text']
         
-        # logger.info(f"✅ RAG chat request validated for chapter: {chapter_id}")
+        logger.info(f"✅ RAG chat request validated for chapter: {chapter_id}")
 
-        # # Get or create a chat session for this specific chapter
-        # session, _ = ChatSession.objects.get_or_create(
-        #     user=user,
-        #     # FIX #3: The model field is 'chapter', not 'chapter_Id'
-        #     chapter_id=chapter_id,
-        #     defaults={'title': f"Chat for chapter {chapter_id}"}
-        # )
-
-        # # Save the user's message
-        # ChatMessage.objects.create(session=session, sender='user', text=user_query)
+        # --- CORRECTED: The Safety Gate is the primary control flow ---
         try:
             document = Document.objects.get(chapter__id=chapter_id, user=user)
             if document.status != Document.STATUS_COMPLETED:
@@ -493,26 +644,22 @@ class RAGChatMessageView(APIView):
                 
                 return Response(
                     {"error": error_msg},
-                    status=status.HTTP_409_CONFLICT # 409 Conflict is a good code for this
+                    status=status.HTTP_409_CONFLICT
                 )
-        except Document.DoesNotExist:
-            return Response({"error": "Document not found for this chapter."}, status=status.HTTP_404_NOT_FOUND)
-        # --- END OF SAFETY GATE ---
-        
-        session, _ = ChatSession.objects.get_or_create(
-            user=user,
-            chapter_id=chapter_id,
-            defaults={'title': f"Chat for chapter {chapter_id}"}
-        )
 
-        ChatMessage.objects.create(session=session, sender='user', text=user_query)
+            # Only after the status check passes, we create the session and message
+            session, _ = ChatSession.objects.get_or_create(
+                user=user,
+                chapter_id=chapter_id,
+                defaults={'title': f"Chat for chapter {chapter_id}"}
+            )
+            ChatMessage.objects.create(session=session, sender='user', text=user_query)
 
-        try:
-            # Call the improved RAG function with the chapter_id
+            # Call the high-performance RAG function
             ai_text_response = async_to_sync(generate_rag_response)(
                 query=user_query, 
                 user_id=user.id,
-                chapter_id=str(chapter_id) # Pass chapter_id for scoped search
+                chapter_id=str(chapter_id)
             )
 
             # Save the AI's response
@@ -522,13 +669,15 @@ class RAGChatMessageView(APIView):
                 text=ai_text_response
             )
             
-            # Send the AI's response back to the frontend
             response_data = {
                 "id": str(ai_message.id),
                 "sender": "ai",
                 "text": ai_message.text
             }
             return Response(response_data, status=status.HTTP_201_CREATED)
+        
+        except Document.DoesNotExist:
+            return Response({"error": "Document not found for this chapter."}, status=status.HTTP_404_NOT_FOUND)
         
         except Exception as e:
             logger.error(f"Error in RAG pipeline for user {user.id}, chapter {chapter_id}: {e}", exc_info=True)

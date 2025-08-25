@@ -3253,3 +3253,583 @@ INFO 2025-08-22 12:15:01,350 _client : HTTP Request: GET http://localhost:6333 "
 INFO 2025-08-22 12:15:01,569 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
 INFO 2025-08-22 12:15:12,188 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
 INFO 2025-08-22 12:15:12,445 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 05:43:47,510 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 05:43:47,657 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 06:20:56,305 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 06:25:19,167 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:25:19,169 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter aa25db80-4906-4320-8bcc-d671d454e750.
+INFO 2025-08-25 06:25:33,040 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:25:33,042 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter af27eb98-8821-410a-bca3-fe5ff03e8203.
+INFO 2025-08-25 06:25:46,197 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:25:46,199 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter aa25db80-4906-4320-8bcc-d671d454e750.
+INFO 2025-08-25 06:25:54,046 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:25:54,047 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter aa25db80-4906-4320-8bcc-d671d454e750.
+INFO 2025-08-25 06:26:04,697 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:26:04,699 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter af27eb98-8821-410a-bca3-fe5ff03e8203.
+INFO 2025-08-25 06:26:23,248 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:26:23,250 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter af27eb98-8821-410a-bca3-fe5ff03e8203.
+WARNING 2025-08-25 06:33:29,355 log : Unauthorized: /auth/subjects/
+WARNING 2025-08-25 06:38:36,874 log : Unauthorized: /auth/rag-chat/
+INFO 2025-08-25 06:38:37,706 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:38:37,707 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter af27eb98-8821-410a-bca3-fe5ff03e8203.
+WARNING 2025-08-25 06:57:27,867 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 06:57:36,006 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 06:57:36,007 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter af27eb98-8821-410a-bca3-fe5ff03e8203.
+INFO 2025-08-25 08:34:53,969 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:34:54,123 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:34:54,216 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:36:33,806 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:37:33,577 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:37:41,199 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+INFO 2025-08-25 08:38:06,520 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:38:06,734 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:38:20,344 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:38:20,589 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:38:20,719 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:38:39,589 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:39:54,585 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+WARNING 2025-08-25 08:40:00,112 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 08:40:09,090 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:40:09,793 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:40:09,798 views : Batch Embedding7 queries...
+INFO 2025-08-25 08:40:10,774 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 08:40:10,789 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:40:10,792 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 512, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 08:40:10,798 log : Internal Server Error: /auth/rag-chat/
+INFO 2025-08-25 08:40:40,331 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:40:40,572 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:40:49,842 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:40:50,484 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:40:50,490 views : Batch Embedding7 queries...
+INFO 2025-08-25 08:40:51,425 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 08:40:51,438 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:40:51,441 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 512, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 08:40:51,446 log : Internal Server Error: /auth/rag-chat/
+WARNING 2025-08-25 08:41:46,636 log : Not Found: /.well-known/appspecific/com.chrome.devtools.json
+WARNING 2025-08-25 08:41:46,745 log : Not Found: /favicon.ico
+WARNING 2025-08-25 08:42:02,912 log : Not Found: /.well-known/appspecific/com.chrome.devtools.json
+INFO 2025-08-25 08:42:48,147 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:42:48,940 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:42:48,942 views : Batch Embedding7 queries...
+INFO 2025-08-25 08:42:49,691 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 08:42:49,708 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:42:49,710 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 512, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 08:42:49,714 log : Internal Server Error: /auth/rag-chat/
+INFO 2025-08-25 08:43:14,514 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:43:15,157 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:43:15,159 views : Batch Embedding7 queries...
+INFO 2025-08-25 08:43:15,812 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 08:43:15,823 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:43:15,825 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 512, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 08:43:15,829 log : Internal Server Error: /auth/rag-chat/
+WARNING 2025-08-25 08:43:31,709 log : Unauthorized: /auth/rag-chat/
+ERROR 2025-08-25 08:43:46,363 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:46:44,595 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:47:11,002 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+ERROR 2025-08-25 08:49:12,819 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+INFO 2025-08-25 08:50:27,556 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:50:27,791 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 08:50:27,893 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 08:50:45,241 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:50:46,149 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 08:50:46,154 views : Batch Embedding8 queries...
+INFO 2025-08-25 08:50:47,211 views : Batch searching Qdrant with 8 requests...
+INFO 2025-08-25 08:50:47,229 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 08:50:47,231 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 512, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 08:50:47,235 log : Internal Server Error: /auth/rag-chat/
+ERROR 2025-08-25 08:54:40,676 log : Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 489, in thread_handler
+    raise exc_info[1]
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/core/handlers/exception.py", line 42, in inner
+    response = await get_response(request)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/utils/deprecation.py", line 132, in __acall__
+    response = await sync_to_async(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 439, in __call__
+    ret = await asyncio.shield(exec_coro)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/current_thread_executor.py", line 40, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 493, in thread_handler
+    return func(*args, **kwargs)
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/middleware/common.py", line 48, in process_request
+    host = request.get_host()
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/django/http/request.py", line 202, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '103.250.160.23'. You may need to add '103.250.160.23' to ALLOWED_HOSTS.
+INFO 2025-08-25 09:04:59,478 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:04:59,702 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:05:29,816 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:05:30,069 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:05:50,045 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:05:50,741 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:05:50,746 views : Batch Embedding7 queries...
+INFO 2025-08-25 09:05:51,637 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 09:05:51,658 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 09:05:51,661 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 512, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 09:05:51,667 log : Internal Server Error: /auth/rag-chat/
+INFO 2025-08-25 09:22:15,943 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:22:16,198 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 09:22:16,279 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 09:22:22,298 views : ✅ RAG chat request validated for chapter: af27eb98-8821-410a-bca3-fe5ff03e8203
+INFO 2025-08-25 09:22:22,423 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:22:23,173 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:22:23,178 views : Batch Embedding7 queries...
+INFO 2025-08-25 09:22:23,942 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 09:22:23,956 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+ERROR 2025-08-25 09:22:23,959 views : Error in RAG pipeline for user 2e40d0d2-ab76-4094-b4ac-883e6c27591c, chapter af27eb98-8821-410a-bca3-fe5ff03e8203: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 496, in post
+    ai_text_response = async_to_sync(generate_rag_response)(
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 262, in __call__
+    return call_result.result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/venv/lib/python3.10/site-packages/asgiref/sync.py", line 302, in main_wrap
+    result = await awaitable
+  File "/home/binaryserver/abhishek/backend /RagBag-backend/accounts/views.py", line 145, in generate_rag_response
+    if r.payload['text'] not in seen:
+TypeError: 'NoneType' object is not subscriptable
+ERROR 2025-08-25 09:22:23,964 log : Internal Server Error: /auth/rag-chat/
+INFO 2025-08-25 09:44:58,607 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:44:58,872 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:16,568 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:16,797 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 09:45:16,889 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 09:45:23,232 views : ✅ RAG chat request validated for chapter: af27eb98-8821-410a-bca3-fe5ff03e8203
+INFO 2025-08-25 09:45:23,391 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:24,135 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:24,143 views : Batch Embedding 7 queries...
+INFO 2025-08-25 09:45:24,951 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 09:45:24,965 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:24,968 views : Generating final answer with Groq...
+INFO 2025-08-25 09:45:26,004 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:53,830 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 09:45:54,083 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:54,734 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:54,737 views : Batch Embedding 7 queries...
+INFO 2025-08-25 09:45:55,392 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 09:45:55,413 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:45:55,415 views : Generating final answer with Groq...
+INFO 2025-08-25 09:45:56,534 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:46:05,838 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 09:46:06,090 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:46:06,658 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:46:06,661 views : Batch Embedding 6 queries...
+INFO 2025-08-25 09:46:07,289 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 09:46:07,300 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:46:07,301 views : Generating final answer with Groq...
+INFO 2025-08-25 09:46:09,727 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:47:16,588 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 09:47:16,841 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:47:17,663 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:47:17,665 views : Batch Embedding 7 queries...
+INFO 2025-08-25 09:47:18,323 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 09:47:18,332 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 09:47:18,333 views : Generating final answer with Groq...
+INFO 2025-08-25 09:47:20,609 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:07:11,100 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:07:11,346 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 10:07:11,475 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 10:07:34,134 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 10:07:34,409 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:07:35,089 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:07:35,094 views : Batch Embedding 6 queries...
+INFO 2025-08-25 10:07:35,887 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 10:07:35,900 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:07:35,903 views : Generating final answer with Groq...
+INFO 2025-08-25 10:07:37,452 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:17:23,964 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:17:24,189 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 10:17:24,301 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 10:19:56,996 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 10:19:57,270 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:19:57,908 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:19:57,913 views : Batch Embedding 6 queries...
+INFO 2025-08-25 10:19:58,695 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 10:19:58,706 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:19:58,710 views : Generating final answer with Groq...
+INFO 2025-08-25 10:20:01,073 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING 2025-08-25 10:31:25,199 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 10:34:10,617 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 10:34:10,885 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:34:11,538 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:34:11,540 views : Batch Embedding 6 queries...
+INFO 2025-08-25 10:34:12,270 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 10:34:12,281 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:34:12,283 views : Generating final answer with Groq...
+INFO 2025-08-25 10:34:14,689 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING 2025-08-25 10:44:44,480 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 10:49:00,837 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:49:01,091 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:49:35,121 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 10:49:35,384 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:49:36,028 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:49:36,031 views : Batch Embedding 6 queries...
+INFO 2025-08-25 10:49:36,815 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 10:49:36,828 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:49:36,831 views : Generating final answer with Groq...
+INFO 2025-08-25 10:49:38,849 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:52:47,341 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:52:47,599 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 10:52:47,732 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 10:53:16,994 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 10:53:17,255 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:53:17,925 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:53:17,930 views : Batch Embedding 6 queries...
+INFO 2025-08-25 10:53:18,726 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 10:53:18,736 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 10:53:18,738 views : Generating final answer with Groq...
+INFO 2025-08-25 10:53:20,485 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:07:44,245 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:07:44,427 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 11:07:44,530 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 11:07:56,026 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 11:07:56,300 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:07:56,976 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:07:56,982 views : Batch Embedding 6 queries...
+INFO 2025-08-25 11:07:57,863 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 11:07:57,877 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:07:57,882 views : Generating final answer with Groq...
+INFO 2025-08-25 11:07:59,756 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING 2025-08-25 11:16:01,874 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 11:16:15,976 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 11:16:16,239 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:16:16,849 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:16:16,851 views : Batch Embedding 6 queries...
+INFO 2025-08-25 11:16:17,583 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 11:16:17,595 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:16:17,597 views : Generating final answer with Groq...
+INFO 2025-08-25 11:16:19,421 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:18:12,125 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 11:18:12,385 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:18:13,036 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:18:13,038 views : Batch Embedding 6 queries...
+INFO 2025-08-25 11:18:13,757 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 11:18:13,770 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:18:13,772 views : Generating final answer with Groq...
+INFO 2025-08-25 11:18:15,651 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING 2025-08-25 11:27:28,519 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 11:27:48,678 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 11:27:48,930 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:27:49,563 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:27:49,566 views : Batch Embedding 6 queries...
+INFO 2025-08-25 11:27:50,303 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 11:27:50,313 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 11:27:50,314 views : Generating final answer with Groq...
+INFO 2025-08-25 11:27:52,198 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING 2025-08-25 11:50:27,607 log : Unauthorized: /auth/subjects/
+WARNING 2025-08-25 12:01:43,121 log : Unauthorized: /auth/subjects/
+WARNING 2025-08-25 12:17:48,388 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 12:18:09,158 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 12:18:09,424 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:18:10,059 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:18:10,062 views : Batch Embedding 6 queries...
+INFO 2025-08-25 12:18:11,103 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 12:18:11,116 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:18:11,118 views : Generating final answer with Groq...
+INFO 2025-08-25 12:18:12,974 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:20:55,310 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 12:20:55,560 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:20:56,201 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:20:56,204 views : Batch Embedding 6 queries...
+INFO 2025-08-25 12:20:56,843 views : Batch searching Qdrant with 6 requests...
+INFO 2025-08-25 12:20:56,852 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:20:56,853 views : Generating final answer with Groq...
+INFO 2025-08-25 12:20:58,713 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING 2025-08-25 12:36:02,288 log : Unauthorized: /auth/subjects/
+WARNING 2025-08-25 12:51:32,827 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 12:54:11,694 views : ✅ RAG chat request validated for chapter: aa25db80-4906-4320-8bcc-d671d454e750
+INFO 2025-08-25 12:54:11,957 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:54:12,814 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:54:12,817 views : Batch Embedding 7 queries...
+INFO 2025-08-25 12:54:13,577 views : Batch searching Qdrant with 7 requests...
+INFO 2025-08-25 12:54:13,591 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/search/batch "HTTP/1.1 200 OK"
+INFO 2025-08-25 12:54:13,592 views : Generating final answer with Groq...
+INFO 2025-08-25 12:54:15,960 _client : HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+INFO 2025-08-25 13:02:13,995 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 13:02:14,244 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 13:02:14,392 log : Unauthorized: /auth/subjects/
