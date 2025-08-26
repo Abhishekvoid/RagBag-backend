@@ -632,7 +632,7 @@ class RAGChatMessageView(APIView):
         chapter_id = validated_data['chapter']
         user_query = validated_data['text']
         
-        logger.info(f"✅ RAG chat request validated for chapter: {chapter_id}")
+        logger.info(f"RAG chat request validated for chapter: {chapter_id}")
 
         # --- CORRECTED: The Safety Gate is the primary control flow ---
         try:
