@@ -3833,3 +3833,16 @@ INFO 2025-08-25 12:54:15,960 _client : HTTP Request: POST https://api.groq.com/o
 INFO 2025-08-25 13:02:13,995 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
 INFO 2025-08-25 13:02:14,244 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
 WARNING 2025-08-25 13:02:14,392 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 23:06:18,364 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:06:18,788 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:07:48,226 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:07:48,691 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:09:06,004 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:09:06,411 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:14:11,847 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:14:12,273 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+WARNING 2025-08-25 23:14:12,476 log : Unauthorized: /auth/subjects/
+INFO 2025-08-25 23:17:12,449 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:17:13,020 _client : HTTP Request: GET http://localhost:6333 "HTTP/1.1 200 OK"
+INFO 2025-08-25 23:17:36,889 _client : HTTP Request: POST http://localhost:6333/collections/studywise_documents/points/count "HTTP/1.1 404 Not Found"
+WARNING 2025-08-25 23:17:36,890 views : SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter aa25db80-4906-4320-8bcc-d671d454e750.
