@@ -21,6 +21,7 @@ from groq import Groq, AsyncGroq
 from .tasks import process_document_ingestion, create_chapter_from_document
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny 
 from utils.formatting import enforce_markdown_spacing
 
 
@@ -551,7 +552,55 @@ class ChapterMessageListView(generics.ListAPIView):
             session__chapter_id=chapter_id,
             session__user=self.request.user
         ).order_by('-created_at')
-# ---------  chatmessage ---------------
+    
+
+
+
+
+
+# -------------------- auth ---------------- 
+
+class OAuthSignInView(APIView):
+    permissions_classes = [AllowAny]
+
+    def post (self,request, *args, **kwargs):
+        email =  request.data.get("email")
+        name = request.data.get("name")
+
+        if not email or not name:
+            return Response(
+                {"error": "Email and name are required."},
+                status= status.HTTP_400_BAD_REQUEST
+            )
+        
+        User =  get_user_model()
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={'name': name}
+        )
+
+        if created:
+            
+            user.set_unusable_password()
+            user.save()
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name' : user.name,
+            },
+            'tokens': {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+            }
+        }, status=status.HTTP_200_OK)
+        
+
+# ---------  chatmessage -------    --------
 class ChatMessageView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [UserRateThrottle]
