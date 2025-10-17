@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageSerializer, RAGChatMessageView, OAuthSignInView
+from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageSerializer, RAGChatMessageView, OAuthSignInView,  GenerateQuestionsView
 
 
 urlpatterns = [
@@ -26,5 +26,9 @@ urlpatterns = [
     path('rag-chat/', RAGChatMessageView.as_view(), name='rag-chat'),
 
     path('oauth-signin/', OAuthSignInView.as_view(), name='oauth_signin'),
+    
+
+      path('chapters/<uuid:chapter_id>/generate-questions/', GenerateQuestionsView.as_view(), name='generate-questions'),
+
 ]
 
