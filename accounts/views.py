@@ -7,12 +7,12 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
-from .models import ChatMessage, ChatSession, Document, Subject, Chapter
+from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion
 import os
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models, AsyncQdrantClient
@@ -23,7 +23,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
 from utils.formatting import enforce_markdown_spacing
-
+import json
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ QDRANT_COLLECTION_NAME = "studywise_documents"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 EMBEDDING_MODEL = "text-embedding-004"
-LLM_MODEL = "llama3-70b-8192"
+LLM_MODEL = "llama-3.1-8b-instant"
 
 
 
@@ -731,3 +731,69 @@ class RAGChatMessageView(APIView):
         except Exception as e:
             logger.error(f"Error in RAG pipeline for user {user.id}, chapter {chapter_id}: {e}", exc_info=True)
             return Response({"error": "Failed to get AI response."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ------------- generated Questions
+
+class GenerateQuestionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, chapter_id, *args, **kwargs):
+        try:
+            # 1. Find the chapter and its documents
+            chapter = Chapter.objects.get(id=chapter_id, user=request.user)
+            documents = chapter.documents.all()
+            if not documents:
+                return Response({"error": "This chapter has no documents to generate questions from."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 2. Consolidate the text from all documents
+            full_text = "\n\n---\n\n".join([doc.extracted_text for doc in documents if doc.extracted_text])
+            if not full_text.strip():
+                 return Response({"error": "Could not find any text in the documents for this chapter."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 3. Create a powerful prompt for the AI
+            prompt = f"""
+            Based on the following text, generate 5-7 challenging study questions that a student could use to test their knowledge.
+            For each question, provide a concise, accurate answer based only on the text.
+
+            Format your response as a valid JSON array of objects, where each object has a "question" key and an "answer" key.
+            Example: [{{"question": "What is the capital of France?", "answer": "Paris."}}]
+
+            TEXT:
+            {full_text[:8000]} # Use a generous context window
+
+            JSON:
+            """
+            
+            # 4. Call the AI
+            chat_completion = groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=LLM_MODEL,
+                # Force the AI to output JSON
+                response_format={"type": "json_object"},
+            )
+            
+          
+            generated_data = json.loads(chat_completion.choices[0].message.content)
+            
+           
+            GenerateQuestion.objects.filter(chapter=chapter).delete()
+
+            new_questions = []
+            for item in generated_data.get("questions", []): # Be safe when parsing
+                question = GenerateQuestion.objects.create(
+                    chapter=chapter,
+                    question_text=item.get("question"),
+                    answer_text=item.get("answer")
+                )
+                new_questions.append(question)
+
+            # 6. Send the new questions back to the frontend
+            serializer = GeneratedQuestionsSerializer(new_questions, many=True)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Chapter.DoesNotExist:
+            return Response({"error": "Chapter not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error generating questions for chapter {chapter_id}: {e}", exc_info=True)
+            return Response({"error": "Failed to generate questions."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

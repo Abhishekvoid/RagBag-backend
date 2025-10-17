@@ -132,3 +132,17 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.sender}: {self.text[:30]}"
+    
+
+# --------------- Question generation
+
+class GenerateQuestion(models.Model):
+    id =models.UUIDField(primary_key=True, default=uuid.uuid4  , editable= True)
+    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='generated_questions')
+    question_text = models.TextField()
+    answer_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+    def __str__ (self):
+        return self.question_text[:50]
