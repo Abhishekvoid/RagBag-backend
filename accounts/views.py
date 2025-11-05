@@ -7,12 +7,12 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, FlashCardSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
-from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion
+from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, FlashCard
 import os
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models, AsyncQdrantClient
@@ -24,7 +24,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
 from utils.formatting import enforce_markdown_spacing
 import json
-
+from django.http import Http404
 
 logger = logging.getLogger(__name__)
 
@@ -769,7 +769,7 @@ class GenerateQuestionsView(APIView):
             chat_completion = groq_client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
-                # Force the AI to output JSON
+               
                 response_format={"type": "json_object"},
             )
             
@@ -797,3 +797,37 @@ class GenerateQuestionsView(APIView):
         except Exception as e:
             logger.error(f"Error generating questions for chapter {chapter_id}: {e}", exc_info=True)
             return Response({"error": "Failed to generate questions."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class FlashCardView(generics.ListCreateAPIView):
+
+    permission_classes= [IsAuthenticated]
+    serializer_class = FlashCardSerializer
+
+    def get_queryset(self):
+        
+        chapter_id = self.kwargs['chapter_id']
+        try: 
+            chapter =  Chapter.objects.get(id=chapter_id, user = self.request.user)
+            return FlashCard.objects.filter(chapter=chapter, user=self.request.user).order_by('created_at')
+        except Chapter.DoesNotExist:
+            return FlashCard.objects.none 
+    
+    def perform_create(self, serializer):
+        user = self.request.user
+        chapter_id = self.kwargs['chapter_id'] 
+        try:
+            chapter = Chapter.objects.get(id=chapter_id,  user=user)
+        except Chapter.DoesNotExist:
+            raise Http404("Chapter not found or does not belong to the user.")
+        serializer.save(user=user, chapter=chapter)
+    # def post (self, request, chapter_id, *args, **kwargs):
+
+    #     try:
+
+    #         chapter =  Chapter.objects.get(id=chapter_id, user=request.user)
+    #         documents = chapter.document.all()
+    #         if not documents:
+    #             return Response({"error": "This chapter has no documents to  generate flashcard"}, status=status.HTTP_400_BAD_REQUEST)
+    #     except Chapter.DoesNotExist:
+    #         return Response({"error": "Chapter not found."}, status=status.HTTP_404_NOT_FOUND)
