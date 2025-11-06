@@ -148,13 +148,15 @@ class GenerateQuestion(models.Model):
     def __str__ (self):
         return self.question_text[:50]
 
-class FlashCard(models.Model):
+class GenerateFlashCards(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='flash_card')
     chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='flash_card')
     flashcard_front = models.TextField()
     flashcard_back = models.TextField()
+    known = models.BooleanField(default=False)
+    need_review = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

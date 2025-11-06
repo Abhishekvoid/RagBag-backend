@@ -7,12 +7,12 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, FlashCardSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, GeneratedFlashCardSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
-from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, FlashCard
+from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCard
 import os
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models, AsyncQdrantClient
@@ -780,7 +780,7 @@ class GenerateQuestionsView(APIView):
             GenerateQuestion.objects.filter(chapter=chapter).delete()
 
             new_questions = []
-            for item in generated_data.get("questions", []): # Be safe when parsing
+            for item in generated_data.get("questions", []): 
                 question = GenerateQuestion.objects.create(
                     chapter=chapter,
                     question_text=item.get("question"),
@@ -799,35 +799,113 @@ class GenerateQuestionsView(APIView):
             return Response({"error": "Failed to generate questions."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 
-class FlashCardView(generics.ListCreateAPIView):
+class GenerateFlashCardView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = GeneratedFlashCardSerializer
 
-    permission_classes= [IsAuthenticated]
-    serializer_class = FlashCardSerializer
+    def post(self, request, chapter_id, *args, **kwargs):
+        try:
+            # Find chapter and documents
+            chapter = Chapter.objects.get(id=chapter_id, user=request.user)
+            documents = chapter.documents.all()
+            if not documents:
+                return Response(
+                    {"error": "No document found to generate flashcards."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Consolidate text
+            full_text = "\n\n---\n\n".join(
+                [doc.extracted_text for doc in documents if doc.extracted_text]
+            )
+            if not full_text.strip():
+                return Response(
+                    {"error": "No readable text found in this document."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # AI Prompt
+            prompt = f"""
+            You are an elite educator with deep interdisciplinary expertise. 
+            Your task is to generate *high-quality educational flashcards* from the following study material.
+
+            🎯 OBJECTIVE:
+            Create flashcards that help a student actively recall and deeply understand key ideas.
+
+            📚 CONTEXT (from source material):
+            {full_text[:8000]}
+
+            ---
+            🧩 INSTRUCTIONS:
+            1. Extract 9–15 of the most important concepts, definitions, and relationships.
+            2. Each flashcard must include:
+                - "flashcard_front": a question or prompt
+                - "flashcard_back": a short answer or explanation (2–3 sentences max)
+            3. Avoid vague, duplicated, or off-topic cards.
+
+            ---
+            🎨 OUTPUT FORMAT:
+            Return the flashcards as a valid JSON object with a single key "flashcards".
+            The value must be an array of 9–15 flashcard objects in this exact structure:
+            {{
+              "flashcards": [
+                {{
+                  "flashcard_front": "What is the primary function of mitochondria?",
+                  "flashcard_back": "They generate ATP through cellular respiration, providing energy for the cell."
+                }}
+              ]
+            }}
+            ⚠️ Do not include commentary or markdown. Output only JSON.
+            """
+
+            chat_completion = groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=LLM_MODEL,
+                response_format={"type": "json_object"},
+            )
+
+            generate_data = json.loads(chat_completion.choices[0].message.content)
+            flashcard_list = generate_data.get("flashcards", [])
+
+            if not isinstance(flashcard_list, list):
+                return Response({"error": "Unexpected AI response format"}, status=status.HTTP_400_BAD_REQUEST)
+
+            new_flashcards = []
+            for item in flashcard_list:
+                if isinstance(item, dict) and "flashcard_front" in item and "flashcard_back" in item:
+                    flashcard = GenerateFlashCard.objects.create(
+                        chapter=chapter,
+                        user=request.user,
+                        flashcard_front=item["flashcard_front"],
+                        flashcard_back=item["flashcard_back"],
+                    )
+                    new_flashcards.append(flashcard)
+
+            if not new_flashcards:
+                return Response(
+                    {"error": "AI failed to generate flashcards in correct format."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer = GeneratedFlashCardSerializer(new_flashcards, many=True)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Chapter.DoesNotExist:
+            return Response({"error": "Chapter not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        except Exception as e:
+            logger.error(f"Error generating flashcards for chapter {chapter_id}: {e}", exc_info=True)
+            return Response(
+                {"error": "Failed to generate flashcards."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+class FlashCardDetailView(generics.RetrieveUpdateDestroyAPIView):
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = GeneratedFlashCardSerializer
+    lookup_field = 'id'
 
     def get_queryset(self):
-        
-        chapter_id = self.kwargs['chapter_id']
-        try: 
-            chapter =  Chapter.objects.get(id=chapter_id, user = self.request.user)
-            return FlashCard.objects.filter(chapter=chapter, user=self.request.user).order_by('created_at')
-        except Chapter.DoesNotExist:
-            return FlashCard.objects.none 
-    
-    def perform_create(self, serializer):
-        user = self.request.user
-        chapter_id = self.kwargs['chapter_id'] 
-        try:
-            chapter = Chapter.objects.get(id=chapter_id,  user=user)
-        except Chapter.DoesNotExist:
-            raise Http404("Chapter not found or does not belong to the user.")
-        serializer.save(user=user, chapter=chapter)
-    # def post (self, request, chapter_id, *args, **kwargs):
 
-    #     try:
-
-    #         chapter =  Chapter.objects.get(id=chapter_id, user=request.user)
-    #         documents = chapter.document.all()
-    #         if not documents:
-    #             return Response({"error": "This chapter has no documents to  generate flashcard"}, status=status.HTTP_400_BAD_REQUEST)
-    #     except Chapter.DoesNotExist:
-    #         return Response({"error": "Chapter not found."}, status=status.HTTP_404_NOT_FOUND)
+        return GenerateFlashCard.objects.filter(user=self.request.user)
