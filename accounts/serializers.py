@@ -145,8 +145,8 @@ class GeneratedQuestionsSerializer(serializers.ModelSerializer):
         fields = ['id', 'question_text', 'answer_text', 'created_at']
 
 
-class FlashCardSerializer(serializers.ModelSerializer):
+class GeneratedFlashCardsSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = FlashCard
-        fields = ['id', 'chapter', 'flashcard_front', 'flashcard_back', 'created_at']
+        fields = ['id', 'chapter', 'flashcard_front', 'flashcard_back', 'known', 'need_review', 'created_at']

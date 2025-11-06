@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageSerializer, RAGChatMessageView, OAuthSignInView,  GenerateQuestionsView, FlashCardView
+from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageSerializer, RAGChatMessageView, OAuthSignInView,  GenerateQuestionsView, GenerateFlashCardView, FlashCardDetailView
 
 
 urlpatterns = [
@@ -30,7 +30,8 @@ urlpatterns = [
 
     path('chapters/<uuid:chapter_id>/generate-questions/', GenerateQuestionsView.as_view(), name='generate-questions'),
 
-    path('chapters/<uuid:chapter_id>/flashcard/', FlashCardView.as_view(), name='flashcard')
+    path('chapters/<uuid:chapter_id>/flashcards/', GenerateFlashCardView.as_view(), name='flashcards'), 
+    path('flashcards/<uuid:id>/', FlashCardDetailView.as_view(), name='flashcards-detail'),
 
 ]
 
