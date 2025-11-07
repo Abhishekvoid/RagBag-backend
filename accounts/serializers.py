@@ -1,7 +1,7 @@
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, FlashCard
+from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards
 User = get_user_model()
 
 ALLOWED_EXTENSIONS = ["pdf", "doc", "docx", "ppt", "pptx", "jpg", "jpeg", "png", "gif"]
@@ -148,5 +148,5 @@ class GeneratedQuestionsSerializer(serializers.ModelSerializer):
 class GeneratedFlashCardsSerializer(serializers.ModelSerializer):
     
     class Meta:
-        model = FlashCard
+        model = GenerateFlashCards
         fields = ['id', 'chapter', 'flashcard_front', 'flashcard_back', 'known', 'need_review', 'created_at']
