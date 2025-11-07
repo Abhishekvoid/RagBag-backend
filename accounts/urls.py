@@ -30,7 +30,7 @@ urlpatterns = [
 
     path('chapters/<uuid:chapter_id>/generate-questions/', GenerateQuestionsView.as_view(), name='generate-questions'),
 
-    path('chapters/<uuid:chapter_id>/flashcards/', GenerateFlashCardView.as_view(), name='flashcards'), 
+    path('chapters/<uuid:chapter_id>/generate-flashcards/', GenerateFlashCardView.as_view(), name='generate-flashcards'), 
     path('flashcards/<uuid:id>/', FlashCardDetailView.as_view(), name='flashcards-detail'),
 
 ]

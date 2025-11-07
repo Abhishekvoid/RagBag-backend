@@ -7,12 +7,12 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, GeneratedFlashCardSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, GeneratedFlashCardsSerializer
 import logging
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
-from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCard
+from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards
 import os
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models, AsyncQdrantClient
@@ -801,7 +801,7 @@ class GenerateQuestionsView(APIView):
 
 class GenerateFlashCardView(APIView):
     permission_classes = [IsAuthenticated]
-    serializer_class = GeneratedFlashCardSerializer
+    serializer_class = GeneratedFlashCardsSerializer
 
     def post(self, request, chapter_id, *args, **kwargs):
         try:
@@ -873,7 +873,7 @@ class GenerateFlashCardView(APIView):
             new_flashcards = []
             for item in flashcard_list:
                 if isinstance(item, dict) and "flashcard_front" in item and "flashcard_back" in item:
-                    flashcard = GenerateFlashCard.objects.create(
+                    flashcard = GenerateFlashCards.objects.create(
                         chapter=chapter,
                         user=request.user,
                         flashcard_front=item["flashcard_front"],
@@ -887,7 +887,7 @@ class GenerateFlashCardView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            serializer = GeneratedFlashCardSerializer(new_flashcards, many=True)
+            serializer = GeneratedFlashCardsSerializer(new_flashcards, many=True)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Chapter.DoesNotExist:
@@ -903,9 +903,9 @@ class GenerateFlashCardView(APIView):
 class FlashCardDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     permission_classes = [IsAuthenticated]
-    serializer_class = GeneratedFlashCardSerializer
+    serializer_class = GeneratedFlashCardsSerializer
     lookup_field = 'id'
 
     def get_queryset(self):
 
-        return GenerateFlashCard.objects.filter(user=self.request.user)
+        return GenerateFlashCards.objects.filter(user=self.request.user)
