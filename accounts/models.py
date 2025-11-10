@@ -1,13 +1,20 @@
 import uuid
+import os
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
 from django.core.validators import EmailValidator
 from .manager import CustomUserManager
 from django.conf import settings
+from django.utils.text import slugify
 
 
 def user_document_path(instance, filename):
+
+    base, ext = os.path.splitext(filename)
+    safe_name = slugify(base)[:50]  # Limit to 50 chars and remove spaces/symbols
+    unique_suffix = uuid.uuid4().hex[:8]
+    filename = f"{safe_name}_{unique_suffix}{ext}"
  
     if hasattr(instance, 'chapter') and instance.chapter and hasattr(instance.chapter, 'subject') and instance.chapter.subject:
      
@@ -71,7 +78,7 @@ class Document(models.Model):
     chapter = models.ForeignKey(Chapter,on_delete=models.SET_NULL, related_name='documents', null=True, blank=True)
     user = models.ForeignKey(CustomUserModel, on_delete=models.CASCADE, related_name='documents')
     title = models.CharField(max_length=100)
-    file = models.FileField(upload_to=user_document_path)
+    file = models.FileField(upload_to=user_document_path, max_length=500)
     file_type = models.CharField(max_length=10, blank=True)
     size_bytes = models.PositiveIntegerField(null=True, blank=True)
     

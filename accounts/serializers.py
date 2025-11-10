@@ -30,6 +30,9 @@ class RegisterSerializers(BaseUserCreateSerializer):
 
 
 
+
+
+
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
@@ -41,7 +44,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         read_only_fields = ("user", "file_type", "size_bytes","status", "error_message", "created_at", "updated_at")
         extra_kwargs = {
             'title': {'required': False},
-            'chapter': {'required': False, 'allow_null': True}
+           
         }
 
     def validate_file(self, file):
@@ -53,6 +56,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         return file
 
     def create(self, validated_data):
+        chapter_id = validated_data.pop('chapter_id', None)
         file = validated_data.get('file')
 
         
@@ -61,6 +65,14 @@ class DocumentSerializer(serializers.ModelSerializer):
             validated_data['file_type'] = file.name.split(".")[-1].lower()
             if 'title' not in validated_data:
                 validated_data['title'] = file.name.rsplit('.', 1)[0]
+
+        chapter_instance = None
+        if chapter_id:
+            try:
+                chapter_instance = Chapter.objects.get(id=chapter_id, user=self.context['request'].user)
+                validated_data['chapter'] = chapter_instance
+            except Chapter.DoesNotExist:
+                raise serializers.ValidationError({"chapter_id":"Chapter not found or does not belong to user."})
         
         return super().create(validated_data)
 # ------------ chapter -----------------

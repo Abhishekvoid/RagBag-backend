@@ -30,7 +30,7 @@ QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
 GOOGLE_API_KEY = getattr(settings, "GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
 GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 EMBEDDING_MODEL = "text-embedding-004"
-LLM_MODEL = "llama3-70b-8192" 
+LLM_MODEL = "llama-3.1-8b-instant" 
 QDRANT_COLLECTION_NAME = "studywise_documents"
 TOKENIZER_NAME = "cl100k_base"
 MAX_CHUNKS_PER_DOCUMENT = 1000
@@ -185,6 +185,32 @@ def create_chapter_from_document(self, document_id: str):
         )
         raise self.retry(exc=e)
 
+@shared_task
+def process_document_for_existing_chapter(document_id, chapter_id):
+    try:
+        document = Document.objects.get(id=document_id)
+        chapter = Chapter.objects.get(id=chapter_id)
+
+        extracted_text = extract_text_from_file(document.file)
+
+        document.extracted_text = extracted_text
+        document.status = Document.STATUS_COMPLETED
+        document.save(update_fields=['extracted_text', 'status'])
+
+        logger.info(f"text Extracted for document{document_id} and associate with chapter {chapter_id}")
+
+    except Document.DoesNotExist:
+        logger.error(f"process_document_for_existing_chapter: Document {document_id} not found.")
+    except Chapter.DoesNotExist:
+        logger.error(f"process_document_for_existing_chapter: Chapter {chapter_id} not found.")
+    except Exception as e:
+        logger.error(f"Error processing document {document_id} for existing chapter {chapter_id}: {e}", exc_info=True)
+        # Mark document as failed if processing fails
+        Document.objects.filter(id=document_id).update(status=Document.STATUS_FAILED, error_message=str(e))
+
+def extract_text_from_file(file_obj):
+   
+    return f"Extracted text from {file_obj.name}"
 # ----- CORRECTED DOCUMENT PROCESSING TASK --------
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def process_document_ingestion(self, document_id: str):
@@ -199,7 +225,6 @@ def process_document_ingestion(self, document_id: str):
         if not doc.extracted_text:
             logger.info(f"[{document_id}] Extracting text for ingestion...")
             doc.extracted_text = get_text_from_file(doc.file.name, doc.file_type)
-            # We save the text to the database to avoid redundant extraction.
             doc.save(update_fields=['extracted_text'])
 
         if not doc.extracted_text.strip():
