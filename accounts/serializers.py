@@ -3,6 +3,9 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards
 User = get_user_model()
+import logging
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = ["pdf", "doc", "docx", "ppt", "pptx", "jpg", "jpeg", "png", "gif"]
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
@@ -56,7 +59,10 @@ class DocumentSerializer(serializers.ModelSerializer):
         return file
 
     def create(self, validated_data):
+        logger.info("DocumentSerializer.create called.")
         chapter_id = validated_data.pop('chapter_id', None)
+
+        validated_data['user'] = self.context['request'].user
         file = validated_data.get('file')
 
         
@@ -71,8 +77,12 @@ class DocumentSerializer(serializers.ModelSerializer):
             try:
                 chapter_instance = Chapter.objects.get(id=chapter_id, user=self.context['request'].user)
                 validated_data['chapter'] = chapter_instance
+                logger.info(f"  - Found existing chapter: {chapter_instance.id} - {chapter_instance.name}")
             except Chapter.DoesNotExist:
+                logger.error(f"  - Chapter with id {chapter_id} not found for user {self.context['request'].user.id}.")
                 raise serializers.ValidationError({"chapter_id":"Chapter not found or does not belong to user."})
+        else:
+            logger.info("  - No chapter_id provided. Document will be standalone.")
         
         return super().create(validated_data)
 # ------------ chapter -----------------
