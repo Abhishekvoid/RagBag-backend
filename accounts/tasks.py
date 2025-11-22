@@ -129,35 +129,127 @@ def chunk_text_by_token(text, tokenizer, chunk_size=384, chunk_overlap=50):
     return chunks
 
 # ----- CORRECTED "SMART CHAPTER" TASK -----
+# @shared_task(bind=True, max_retries=3, default_retry_delay=60)
+# def create_chapter_from_document(self, document_id: str):
+#     logger.info(f"[{document_id}] Starting smart chapter creation...")
+#     doc = Document.objects.get(id=document_id)
+
+#     # --- NEW: Set status to PROCESSING immediately ---
+#     doc.status = Document.STATUS_PROCESSING
+#     doc.save(update_fields=['status'])
+
+#     try:
+#         _, _, groq_client = _get_clients()
+#         _initialize_google_ai()
+
+#         document_text = get_text_from_file(doc.file.name, doc.file_type)
+#         if not document_text:
+#             raise ValueError("No text could be extracted from the document.")
+
+#         prompt = f"Based on the following text, create a short, descriptive title (4-5 words max) for a new chapter. Do not use quotes.\n\nTEXT:\n{document_text[:4000]}\n\nTITLE:"
+#         chat_completion = groq_client.chat.completions.create(
+#             messages=[{"role": "user", "content": prompt}],
+#             model=LLM_MODEL,
+#         )
+#         ai_generated_title = chat_completion.choices[0].message.content.strip().strip('"')
+
+#         new_chapter = Chapter.objects.create(user=doc.user, name=ai_generated_title)
+
+#         doc.chapter = new_chapter
+#         doc.title = ai_generated_title
+#         doc.save()
+
+#         # --- NEW: Send a success notification ---
+#         channel_layer = get_channel_layer()
+#         async_to_sync(channel_layer.group_send)(
+#             f"user_{doc.user.id}",
+#             {"type": "send_notification", "message": "notebook_updated"}
+#         )
+
+#         # Trigger the ingestion task with the document ID
+#         process_document_ingestion.delay(str(doc.id))
+
+#         logger.info(f"[{document_id}] Successfully created chapter '{ai_generated_title}' and triggered ingestion.")
+
+#     except Exception as e:
+#         logger.error(f"[{document_id}] Chapter creation or ingestion trigger failed: {e}", exc_info=True)
+#         # --- NEW: On failure, update status and save error ---
+#         doc.status = Document.STATUS_FAILED
+#         doc.error_message = str(e)
+#         doc.save(update_fields=['status', 'error_message'])
+#         # You can optionally send a failure notification here
+#         channel_layer = get_channel_layer()
+#         async_to_sync(channel_layer.group_send)(
+#             f"user_{doc.user.id}",
+#             {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
+#         )
+#         raise self.retry(exc=e)
+
+# @shared_task
+# def process_document_for_existing_chapter(document_id, chapter_id):
+#     try:
+#         document = Document.objects.get(id=document_id)
+#         chapter = Chapter.objects.get(id=chapter_id)
+
+#         extracted_text = extract_text_from_file(document.file)
+
+#         document.extracted_text = extracted_text
+#         document.status = Document.STATUS_COMPLETED
+#         document.save(update_fields=['extracted_text', 'status'])
+
+#         logger.info(f"text Extracted for document{document_id} and associate with chapter {chapter_id}")
+
+#     except Document.DoesNotExist:
+#         logger.error(f"process_document_for_existing_chapter: Document {document_id} not found.")
+#     except Chapter.DoesNotExist:
+#         logger.error(f"process_document_for_existing_chapter: Chapter {chapter_id} not found.")
+#     except Exception as e:
+#         logger.error(f"Error processing document {document_id} for existing chapter {chapter_id}: {e}", exc_info=True)
+#         # Mark document as failed if processing fails
+#         Document.objects.filter(id=document_id).update(status=Document.STATUS_FAILED, error_message=str(e))
+
+def extract_text_from_file(file_obj):
+   
+    return f"Extracted text from {file_obj.name}"
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def create_chapter_from_document(self, document_id: str):
-    logger.info(f"[{document_id}] Starting smart chapter creation...")
-    doc = Document.objects.get(id=document_id)
-
-    # --- NEW: Set status to PROCESSING immediately ---
-    doc.status = Document.STATUS_PROCESSING
-    doc.save(update_fields=['status'])
-
+    logger.info(f"[{document_id}] TASK STARTED: create_chapter_from_document")
+    
     try:
+        doc = Document.objects.get(id=document_id)
+        logger.info(f"[{document_id}] Document found. Setting status to PROCESSING.")
+        
+        # --- NEW: Set status to PROCESSING immediately ---
+        doc.status = Document.STATUS_PROCESSING
+        doc.save(update_fields=['status'])
+
         _, _, groq_client = _get_clients()
         _initialize_google_ai()
 
+        logger.info(f"[{document_id}] Extracting text from file: {doc.file.name}")
         document_text = get_text_from_file(doc.file.name, doc.file_type)
         if not document_text:
             raise ValueError("No text could be extracted from the document.")
+        logger.info(f"[{document_id}] Text extracted successfully. Length: {len(document_text)} characters.")
 
         prompt = f"Based on the following text, create a short, descriptive title (4-5 words max) for a new chapter. Do not use quotes.\n\nTEXT:\n{document_text[:4000]}\n\nTITLE:"
+        
+        logger.info(f"[{document_id}] Generating chapter title with Groq...")
         chat_completion = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model=LLM_MODEL,
         )
         ai_generated_title = chat_completion.choices[0].message.content.strip().strip('"')
+        logger.info(f"[{document_id}] Generated title: '{ai_generated_title}'")
 
         new_chapter = Chapter.objects.create(user=doc.user, name=ai_generated_title)
+        logger.info(f"[{document_id}] New chapter created with ID: {new_chapter.id}")
 
         doc.chapter = new_chapter
         doc.title = ai_generated_title
         doc.save()
+        logger.info(f"[{document_id}] Document updated with new chapter and title.")
 
         # --- NEW: Send a success notification ---
         channel_layer = get_channel_layer()
@@ -165,39 +257,48 @@ def create_chapter_from_document(self, document_id: str):
             f"user_{doc.user.id}",
             {"type": "send_notification", "message": "notebook_updated"}
         )
+        logger.info(f"[{document_id}] Notification 'notebook_updated' sent.")
 
         # Trigger the ingestion task with the document ID
+        logger.info(f"[{document_id}] Triggering 'process_document_ingestion' task...")
         process_document_ingestion.delay(str(doc.id))
+        logger.info(f"[{document_id}] TASK FINISHED: create_chapter_from_document (ingestion triggered).")
 
-        logger.info(f"[{document_id}] Successfully created chapter '{ai_generated_title}' and triggered ingestion.")
-
+    except Document.DoesNotExist:
+        logger.error(f"[{document_id}] TASK FAILED: Document not found.")
     except Exception as e:
-        logger.error(f"[{document_id}] Chapter creation or ingestion trigger failed: {e}", exc_info=True)
+        logger.error(f"[{document_id}] TASK FAILED: Chapter creation or ingestion trigger failed: {e}", exc_info=True)
         # --- NEW: On failure, update status and save error ---
-        doc.status = Document.STATUS_FAILED
-        doc.error_message = str(e)
-        doc.save(update_fields=['status', 'error_message'])
+        try:
+            doc = Document.objects.get(id=document_id)
+            doc.status = Document.STATUS_FAILED
+            doc.error_message = str(e)
+            doc.save(update_fields=['status', 'error_message'])
+        except:
+            pass # If doc doesn't exist, we can't update it
+
         # You can optionally send a failure notification here
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{doc.user.id}",
-            {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
-        )
+        # ...
         raise self.retry(exc=e)
 
 @shared_task
 def process_document_for_existing_chapter(document_id, chapter_id):
+    logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] TASK STARTED: process_document_for_existing_chapter")
     try:
         document = Document.objects.get(id=document_id)
         chapter = Chapter.objects.get(id=chapter_id)
+        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Document and Chapter found.")
 
+        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Extracting text from file: {document.file.name}")
         extracted_text = extract_text_from_file(document.file)
+        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Text extracted. Length: {len(extracted_text)} characters.")
 
         document.extracted_text = extracted_text
         document.status = Document.STATUS_COMPLETED
         document.save(update_fields=['extracted_text', 'status'])
+        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Document updated with extracted text and status COMPLETED.")
 
-        logger.info(f"text Extracted for document{document_id} and associate with chapter {chapter_id}")
+        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] TASK FINISHED: process_document_for_existing_chapter")
 
     except Document.DoesNotExist:
         logger.error(f"process_document_for_existing_chapter: Document {document_id} not found.")
@@ -207,10 +308,6 @@ def process_document_for_existing_chapter(document_id, chapter_id):
         logger.error(f"Error processing document {document_id} for existing chapter {chapter_id}: {e}", exc_info=True)
         # Mark document as failed if processing fails
         Document.objects.filter(id=document_id).update(status=Document.STATUS_FAILED, error_message=str(e))
-
-def extract_text_from_file(file_obj):
-   
-    return f"Extracted text from {file_obj.name}"
 # ----- CORRECTED DOCUMENT PROCESSING TASK --------
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def process_document_ingestion(self, document_id: str):
