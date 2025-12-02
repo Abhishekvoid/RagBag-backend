@@ -37,6 +37,11 @@ EMBEDDING_MODEL = "text-embedding-004"
 LLM_MODEL = "llama-3.1-8b-instant"
 
 
+v = os.getenv("GROQ_API_KEY")
+logger.info("GROQ_API_KEY repr: %s", repr(v) if v is not None else "None")
+if v:
+    logger.info("GROQ_API_KEY masked: %s...%s", v[:4], v[-4:])
+
 
 try: 
     if not GOOGLE_API_KEY:
@@ -761,6 +766,7 @@ class RAGChatMessageView(APIView):
         
         except Document.DoesNotExist:
             return Response({"error": "Document not found for this chapter."}, status=status.HTTP_404_NOT_FOUND)
+        
         
         except Exception as e:
             logger.error(f"Error in RAG pipeline for user {user.id}, chapter {chapter_id}: {e}", exc_info=True)
