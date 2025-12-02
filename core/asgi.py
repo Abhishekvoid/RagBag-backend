@@ -9,6 +9,7 @@ django_asgi_app = get_asgi_application()
 from channels.routing import ProtocolTypeRouter, URLRouter
 from accounts.middleware import JWTAuthMiddleware
 import accounts.routing
+import os
 
 application = ProtocolTypeRouter({
   "http": django_asgi_app, 
