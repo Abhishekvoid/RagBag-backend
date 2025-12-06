@@ -8,7 +8,7 @@ from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, GeneratedFlashCardsSerializer
-import logging
+import logging, time
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
@@ -25,7 +25,9 @@ from rest_framework.permissions import AllowAny
 from utils.formatting import enforce_markdown_spacing
 import json
 from django.http import Http404
-
+from django.utils.decorators import method_decorator
+from utils.timing import time_sync, time_async
+from django.views.decorators.csrf import csrf_exempt
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -363,7 +365,21 @@ async def generate_rag_response(query: str, user_id: str, chapter_id: str):
     formatted_output = enforce_markdown_spacing(raw_output)
     return formatted_output
 
+class debugTokenCreateView("accounts"):
+    @method_decorator(csrf_exempt)
+    def post(self, request, *args, **kwargs):
+        start =  time.perf_counter()
+        logger.info("start jwt_create post - header=%s", dict(request.headers))
 
+        t0 = time.prep_counter()
+        response = super().post(request,  *args, **kwargs)
+        t1 = time.pref_counter()
+        logger.info("STEP auth/serailizer %.2fms", (t1-t0)* 1000 )
+
+
+        total = (time.perf_counter() - start) * 1000
+        logger.info("END jwt_create total %.2fms", total)
+        return response
 class RegisterAPIView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_classes = [UserRateThrottle]  
