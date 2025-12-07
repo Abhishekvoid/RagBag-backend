@@ -65,7 +65,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-MIDDLEWARE.insert(0, "core.middleware.request_timer.RequestTimingMiddleware")
+MIDDLEWARE.insert(0, "core.middleware.request_timer.RequestTimerMiddleware")
 
 ROOT_URLCONF = 'core.urls'
 
@@ -160,7 +160,12 @@ DATABASES = {
         'OPTIONS': { 'sslmode': 'require' },
     }
 }
-
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.sqlite3",
+#         "NAME": BASE_DIR / "db.sqlite3",
+#     }
+# }
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',

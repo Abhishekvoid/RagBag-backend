@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageSerializer, RAGChatMessageView, OAuthSignInView,  GenerateQuestionsView, GenerateFlashCardView, FlashCardDetailView
+from .views import RegisterAPIView, ChatSessionRetriveView, ChatMessageView, ChatSessionView,  SubjectListCreateView, SubjectListCreateView, ChapterListCreateView, ChapterDetailView, ChapterMessageListView, DocumentListCreateView, DocumentDetailView, RAGChatMessageView, OAuthSignInView,  GenerateQuestionsView, GenerateFlashCardView, FlashCardDetailView
 
 
 urlpatterns = [
