@@ -1,17 +1,13 @@
-import time
-import logging
+import time, logging
+from django.utils.deprecation import MiddlewareMixin
+logger = logging.getLogger("core.reqtimer")
 
-logger = logging.getLogger("core")
+class RequestTimerMiddleware(MiddlewareMixin):
+    def process_request(self, request):
+        request._start_time = time.perf_counter()
 
-class RequestTimingMiddleware:
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        start = time.perf_counter()
-        try:
-            response = self.get_response(request)
-            return response
-        finally:
-            duration_ms = (time.perf_counter() - start) * 1000
-            logger.info("%s %s %s %.2fms", request.method, request.path, getattr(request, "user", "anon"), duration_ms)
+    def process_response(self, request, response):
+        if hasattr(request, "_start_time"):
+            ms = (time.perf_counter() - request._start_time) * 1000
+            logger.info("REQ %s %s %.2fms", request.method, request.path, ms)
+        return response
