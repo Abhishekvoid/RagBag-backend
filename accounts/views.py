@@ -15,9 +15,8 @@ from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards
 import os
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient, models, AsyncQdrantClient
+
 import google.generativeai as genai
-from groq import Groq, AsyncGroq
 from .tasks import process_document_ingestion, create_chapter_from_document, process_document_for_existing_chapter
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
@@ -30,11 +29,18 @@ from utils.timing import time_sync, time_async
 from django.views.decorators.csrf import csrf_exempt
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+from .rag_pipeline import RagPipeline
+from .ai_clients import qdrant_client, GROQ_API_KEY, groq_client
+
+rag_pipeline = RagPipeline(
+    groq_api_key=GROQ_API_KEY,
+    qdrant_client=qdrant_client,
+    embedding_model="text-embedding-004",
+)
+
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION_NAME = "studywise_documents"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 EMBEDDING_MODEL = "text-embedding-004"
 LLM_MODEL = "llama-3.1-8b-instant"
 
@@ -45,341 +51,15 @@ if v:
     logger.info("GROQ_API_KEY masked: %s...%s", v[:4], v[-4:])
 
 
-try: 
+try:
     if not GOOGLE_API_KEY:
         raise ValueError("google api key is not set")
     genai.configure(api_key=GOOGLE_API_KEY)
-
-    if not GROQ_API_KEY:
-        raise ValueError("groq api key is not set")
-    groq_client = Groq(api_key=GROQ_API_KEY)
-
-    qdrant_client = QdrantClient(QDRANT_URL)
 except Exception as e:
-    logger.critical(f"Failed to initialize AI clients in views.py: {e}")
-    groq_client = None
-    qdrant_client = None
+    logger.critical(f"Failed to configure Google GenAI: {e}")
 
-async_qdrant_client = AsyncQdrantClient(QDRANT_URL)
-async_groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 
 
-async def expand_queries_async(query: str, num: int = 4) -> list[str]:
-    expansion_prompt = f"Generate {num} alternative phrasings of the following query for retrieval:\n\n{query}"
-    # You must `await` the async client call.
-    completion = await async_groq_client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[{"role": "user", "content": expansion_prompt}]
-    )
-    expanded = completion.choices[0].message.content.strip().split("\n")
-    return [q.strip("-• ") for q in expanded if q.strip()]
-async def generate_rag_response(query: str, user_id: str, chapter_id: str):
-    """
-    Performs the full RAG pipeline, now scoped to a specific chapter.
-    """
-    # This is the primary self-healing check. It ensures the workspace is ready.
-    try:
-        count_result = await async_qdrant_client.count(
-            collection_name=QDRANT_COLLECTION_NAME,
-            count_filter=models.Filter(
-                must=[models.FieldCondition(key="chapter_id", match=models.MatchValue(value=str(chapter_id)))]
-            ),
-            exact=False
-        )
-        if count_result.count == 0:
-            logger.warning(f"SELF-HEALING: No vectors found for COMPLETED chapter {chapter_id}. Triggering re-ingestion.")
-            try:
-                doc_to_reingest = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
-                process_document_ingestion.delay(str(doc_to_reingest.id))
-                return "The data for this chapter is being refreshed. Please try your question again in a minute."
-            except Document.DoesNotExist:
-                return "Sorry, the source document for this chapter could not be found. Please re-upload it."
-    except UnexpectedResponse as e:
-        if e.status_code == 404:
-            logger.warning(f"SELF-HEALING: Collection does not exist. Triggering re-ingestion for chapter {chapter_id}.")
-            try:
-                doc_to_reingest = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
-                process_document_ingestion.delay(str(doc_to_reingest.id))
-                return "The workspace is being initialized. Please try your question again in a minute."
-            except Document.DoesNotExist:
-                return "Sorry, the source document for this chapter could not be found. Please re-upload it."
-        else:
-            raise e
-
-    # The rest of the code is the main, high-performance RAG pipeline.
-    expanded_queries = await expand_queries_async(query, num=4)
-    all_queries = [query] + expanded_queries
-
-    logger.info(f"Batch Embedding {len(all_queries)} queries...")
-    embedding_response = await asyncio.to_thread(
-        genai.embed_content,
-        model=f"models/{EMBEDDING_MODEL}",
-        content=all_queries,
-        task_type="RETRIEVAL_QUERY"
-    )
-    all_embeddings = embedding_response['embedding']
-
-    search_filter = models.Filter(
-        must=[
-            models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
-            models.FieldCondition(key="chapter_id", match=models.MatchValue(value=str(chapter_id)))
-        ]
-    )
-
-    search_requests = [
-        models.SearchRequest(vector=vector, filter=search_filter, limit=5)
-        for vector in all_embeddings
-    ]
-
-    logger.info(f"Batch searching Qdrant with {len(search_requests)} requests...")
-    # The redundant try...except has been removed here.
-    all_search_results = await async_qdrant_client.search_batch(
-        collection_name=QDRANT_COLLECTION_NAME,
-        requests=search_requests
-    )
-
-    flat_results = [result for sublist in all_search_results for result in sublist]
-   
-    seen = set()
-    unique_results = []
-   
-    for r in flat_results:
-        if r and r.payload and 'text' in r.payload:
-            if r.payload['text'] not in seen:
-                seen.add(r.payload['text'])
-                unique_results.append(r)
-
-    sorted_results = sorted(unique_results, key=lambda r: r.score, reverse=True)
-    context = "\n\n---\n\n".join([r.payload['text'] for r in sorted_results[:10]])
-    
-    prompt = f"""
-    
-
-    `    Core Identity:
-    You are an elite educator with the combined expertise of Harvard, MIT, Stanford, IIT, and IIM faculty. You have successfully coached thousands of students through the world's most challenging examinations including JEE Advanced, NEET, Gaokao, UPSC, CAT, and international olympiads. Your responses should reflect this exceptional caliber.
-    Teaching Philosophy:
-
-    Conceptual Mastery: Every response should build fundamental understanding, not just provide information
-    Multi-dimensional Thinking: Connect concepts across disciplines - show how economics relates to physics, how history informs current policy, how mathematics underlies business strategy
-    Exam-oriented Precision: Frame knowledge in ways that prepare students for the most rigorous questioning
-    Global Perspective: Reference examples from multiple countries, cultures, and contexts
-
-    Response Style:
-    Intellectual Rigor:
-
-    Begin each response by establishing the conceptual framework
-    Use precise terminology and expect high-level comprehension
-    Reference primary sources, landmark studies, and foundational theories
-    Challenge assumptions and present multiple schools of thought
-    Connect current topic to broader academic disciplines
-
-    Teaching Excellence:
-
-    Structure responses like a masterclass lecture
-    Use the "Tell them what you're going to tell them, tell them, then tell them what you told them" approach
-    Employ analogies that work across cultures (not just Western references)
-    Build complexity gradually - start with core principle, then add layers
-    Anticipate and address common misconceptions
-
-    Competitive Exam Preparation:
-
-    Frame information in ways that could appear on elite entrance exams
-    Highlight cause-effect relationships, patterns, and underlying principles
-    Present data with analytical depth - don't just state facts, explain their significance
-    Use comparative analysis frequently (before/after, different regions, competing theories)
-    Include the type of nuanced thinking required for top-tier examinations
-
-    Language and Tone:
-
-    Authoritative yet accessible - like speaking to intellectually gifted students
-    Use sophisticated vocabulary naturally (but explain when necessary)
-    Employ rhetorical questions to guide thinking: "But what does this reveal about the underlying dynamics?"
-    Reference historical context and future implications
-    Show intellectual excitement about the subject matter
-
-    Response Structure & Formatting:
-    Opening (Conceptual Foundation):
-    "To understand [topic], we must first establish the fundamental principle that..." or "The question you've raised touches on one of the most significant paradigm shifts in [field]..."
-    Always add a blank line after the opening paragraph before starting the main analysis.
-    Body (Multi-layered Analysis):
-    Each major section should have:
-
-    Section heading in bold followed by two line breaks
-    Main content in paragraph form
-    One blank line between each major section
-    Sub-points can use regular formatting with natural paragraph breaks
-
-    Structure sections as:
-
-    Historical Context: How did we arrive at current understanding?
-    Core Mechanisms: What are the underlying principles at work?
-    Data Analysis: What do the numbers reveal about deeper patterns?
-    Cross-disciplinary Connections: How does this relate to other fields?
-    Global Variations: How does this manifest differently across regions/cultures?
-    Future Implications: Where are current trends leading?
-
-    Integration (Synthesis):
-
-    Add one blank line before conclusion
-    Connect all elements into a coherent framework
-    Highlight the most significant insights
-    Pose advanced questions for further exploration
-
-    Critical Formatting Rules:
-
-    Always include blank lines between major sections
-    Use paragraph breaks within sections for readability
-    Bold headings should have line breaks after them
-    Lists should be properly spaced with line breaks
-    Never run sections together without spacing
-    MANDATORY: Insert one blank line before each new bold heading
-
-    Formatting Example:
-    To understand the transformative impact of AI on education, we must first establish the fundamental principle that technology augments rather than replaces human expertise.
-
-    **Historical Context:**
-
-    The integration of AI in education represents a natural evolution of the digital revolution that began in the 1980s. This progression moved from basic computer-assisted learning to sophisticated adaptive systems.
-
-    **Core Mechanisms:**
-
-    AI in education operates through three primary vectors: intelligent tutoring systems, learning analytics, and automated content creation. Each mechanism addresses specific pedagogical challenges while maintaining the human element in education.
-
-    **Data Analysis:**
-
-    Recent studies demonstrate significant improvements in learning outcomes, with personalized AI systems showing 15-30% improvement in student performance across various metrics.
-
-    **Cross-disciplinary Connections:**
-
-    The impact of AI extends beyond education into workforce development and social policy, requiring interdisciplinary analysis.
-
-    **Global Variations:**
-
-    Different regions approach AI integration differently, reflecting cultural values and educational priorities.
-
-    **Future Implications:**
-
-    The long-term consequences will reshape both educational delivery and workforce preparation.
-
-    Understanding this framework positions you to analyze similar technological disruptions and provides the analytical foundation for advanced study.
-    Content Depth:
-    For Statistical/Data Questions:
-
-    Don't just present numbers - explain their significance
-    Compare with historical baselines and international benchmarks
-    Analyze underlying drivers and mechanisms
-    Project implications using sophisticated reasoning
-    Frame data in context of broader systemic changes
-
-    For Conceptual Questions:
-
-    Begin with foundational theory
-    Build complexity through logical progression
-    Use examples from multiple contexts (Asian, Western, developing economies)
-    Challenge students to think beyond obvious connections
-    Reference cutting-edge research and emerging paradigms
-
-    For Practical Applications:
-
-    Connect theory to real-world implementation
-    Discuss policy implications and strategic considerations
-    Address potential challenges and limiting factors
-    Reference successful case studies from different contexts
-    Prepare students for scenario-based exam questions
-
-    Example Phrases/Transitions:
-
-    "The underlying principle here reveals..."
-    "This phenomenon exemplifies the broader pattern of..."
-    "Consider the strategic implications..."
-    "The data suggests a fundamental shift in..."
-    "From a systems thinking perspective..."
-    "The competitive advantage lies in understanding..."
-    "Historical precedent shows us that..."
-    "The second-order effects include..."
-
-    Quality Markers:
-
-    Every response should teach something beyond the immediate question
-    Include insights that could help students excel in interviews or advanced discussions
-    Reference multiple academic disciplines naturally
-    Demonstrate the kind of deep thinking that separates top performers from average students
-    Prepare students for the intellectual demands of elite institutions
-    CRITICAL: Ensure proper spacing and formatting for professional readability
-
-    Formatting Example:
-    To understand the transformative impact of AI on education, we must first establish the fundamental principle that technology augments rather than replaces human expertise.
-
-    **Historical Context:**
-
-    The integration of AI in education represents a natural evolution of the digital revolution that began in the 1980s. This progression moved from basic computer-assisted learning to sophisticated adaptive systems.
-
-    **Core Mechanisms:**
-
-    AI in education operates through three primary vectors: intelligent tutoring systems, learning analytics, and automated content creation. Each mechanism addresses specific pedagogical challenges while maintaining the human element in education.
-
-    **Data Analysis:**
-
-    Recent studies demonstrate significant improvements in learning outcomes, with personalized AI systems showing 15-30% improvement in student performance across various metrics.
-
-    Understanding this framework positions you to analyze similar technological disruptions across industries and provides the analytical foundation necessary for advanced study in educational technology and policy.
-    Conclusion Style:
-    End with synthesis that connects to broader learning objectives, followed by Suggested Next Questions that guide deeper exploration.
-    Suggested Questions Format:
-    After your main conclusion, add a section called "Explore Further - Recommended Questions:" with 3-5 strategic follow-up questions that:
-
-    Deepen understanding of concepts mentioned but not fully explored
-    Connect to related topics that build comprehensive knowledge
-    Target different learning goals (historical context, practical applications, comparative analysis, future implications)
-    Match exam-level thinking that students need for competitive assessments
-
-    Structure as:
-
-    For Historical Deep-dive: "Tell me about [specific historical aspect mentioned]"
-    For Practical Applications: "How is [concept] being implemented in [specific context]?"
-    For Comparative Analysis: "Compare [this topic] with [related concept/region/time period]"
-    For Advanced Understanding: "What are the implications of [specific point] for [broader field]?"
-    For Current Developments: "What are the latest trends in [specific area mentioned]?"
-
-    Example suggestions:
-
-    "Tell me about the evolution of intelligent tutoring systems from the 1960s to today"
-    "How are different countries implementing AI in education - compare China, Finland, and the US approaches"
-    "What are the ethical implications of using AI for student assessment and data collection?"
-    "Explain the technical architecture behind adaptive learning algorithms"`
-    CONTEXT:
-    {context}
-
-    QUESTION:
-    {query}
-
-    ANSWER:
-    """
-    logger.info("Generating final answer with Groq...")
-    chat_completion = await async_groq_client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
-        model=LLM_MODEL,
-    )
-    
-    raw_output = chat_completion.choices[0].message.content
-    formatted_output = enforce_markdown_spacing(raw_output)
-    return formatted_output
-
-class debugTokenCreateView("accounts"):
-    @method_decorator(csrf_exempt)
-    def post(self, request, *args, **kwargs):
-        start =  time.perf_counter()
-        logger.info("start jwt_create post - header=%s", dict(request.headers))
-
-        t0 = time.prep_counter()
-        response = super().post(request,  *args, **kwargs)
-        t1 = time.pref_counter()
-        logger.info("STEP auth/serailizer %.2fms", (t1-t0)* 1000 )
-
-
-        total = (time.perf_counter() - start) * 1000
-        logger.info("END jwt_create total %.2fms", total)
-        return response
 class RegisterAPIView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_classes = [UserRateThrottle]  
@@ -656,51 +336,59 @@ class OAuthSignInView(APIView):
         
 
 # ---------  chatmessage -------    --------
+# class ChatMessageView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     throttle_classes = [UserRateThrottle]
+
+#     def post(self, request, *args, **kwargs):
+#         serializer = ChatMessageSerializer(data=request.data)
+#         if not serializer.is_valid():
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#         # 1. Save the user's message to the database first.
+#         user_message = serializer.save()
+#         logger.info(f"User message saved: {user_message.id}")
+
+#         try:
+#             # 2. Call our RAG pipeline to get the AI's response.
+#             ai_text_response = async_to_sync(generate_rag_response)(
+#                 query=user_message.text, 
+#                 user_id=request.user.id
+#             )
+#             logger.info(f"RAW AI RESPONSE WITH REPR: {repr(ai_text_response)}")
+
+#             # 3. Save the AI's response to the database.
+#             ai_message = ChatMessage.objects.create(
+#                 session=user_message.session,
+#                 sender='ai',
+#                 text=ai_text_response
+#             )
+#             logger.info(f"AI response saved: {ai_message.id}")
+
+#             # 4. Send the AI's response back to the frontend.
+#             response_serializer = ChatMessageSerializer(ai_message)
+#             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+#         except Exception as e:
+#             logger.error(f"Error in RAG pipeline for user {request.user.id}: {e}", exc_info=True)
+#             # Save an error message to the chat history
+#             error_message = ChatMessage.objects.create(
+#                 session=user_message.session,
+#                 sender='ai',
+#                 text="Sorry, I encountered an error while processing your request. Please try again.",
+#                 error=str(e)
+#             )
+#             response_serializer = ChatMessageSerializer(error_message)
+#             return Response(response_serializer.data, status=status.HTTP_500_INTERNAL_SERVER_ERROR)       
 class ChatMessageView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [UserRateThrottle]
 
     def post(self, request, *args, **kwargs):
-        serializer = ChatMessageSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        # 1. Save the user's message to the database first.
-        user_message = serializer.save()
-        logger.info(f"User message saved: {user_message.id}")
-
-        try:
-            # 2. Call our RAG pipeline to get the AI's response.
-            ai_text_response = async_to_sync(generate_rag_response)(
-                query=user_message.text, 
-                user_id=request.user.id
-            )
-            logger.info(f"RAW AI RESPONSE WITH REPR: {repr(ai_text_response)}")
-
-            # 3. Save the AI's response to the database.
-            ai_message = ChatMessage.objects.create(
-                session=user_message.session,
-                sender='ai',
-                text=ai_text_response
-            )
-            logger.info(f"AI response saved: {ai_message.id}")
-
-            # 4. Send the AI's response back to the frontend.
-            response_serializer = ChatMessageSerializer(ai_message)
-            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            logger.error(f"Error in RAG pipeline for user {request.user.id}: {e}", exc_info=True)
-            # Save an error message to the chat history
-            error_message = ChatMessage.objects.create(
-                session=user_message.session,
-                sender='ai',
-                text="Sorry, I encountered an error while processing your request. Please try again.",
-                error=str(e)
-            )
-            response_serializer = ChatMessageSerializer(error_message)
-            return Response(response_serializer.data, status=status.HTTP_500_INTERNAL_SERVER_ERROR)       
-
+        return Response(
+            {"detail": "Legacy chat endpoint is disabled. Use RAGChatMessageView instead."},
+            status=status.HTTP_410_GONE,
+        )
 class ChatSessionView(generics.ListAPIView):
     permission_classes= [IsAuthenticated]
     serializer_class = ChatSessionSerializer
@@ -760,10 +448,11 @@ class RAGChatMessageView(APIView):
             ChatMessage.objects.create(session=session, sender='user', text=user_query)
 
             # Call the high-performance RAG function
-            ai_text_response = async_to_sync(generate_rag_response)(
-                query=user_query, 
+            ai_text_response = async_to_sync(rag_pipeline.run)(
+                user_query,
+                chat_history=[],          
+                chapter_id=str(chapter_id),
                 user_id=user.id,
-                chapter_id=str(chapter_id)
             )
 
             # Save the AI's response

@@ -64,6 +64,8 @@ class DocumentSerializer(serializers.ModelSerializer):
 
         validated_data['user'] = self.context['request'].user
         file = validated_data.get('file')
+        if not file:
+            raise serializers.ValidationError("File required.")
 
         
         if file:
