@@ -8,12 +8,13 @@ from dotenv import load_dotenv
 
 from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
-
+import json
 
 from .ai_clients import async_qdrant_client  # we’ll still use self.groq_client for LLM
 from .models import Document
 from .tasks import process_document_ingestion
 from utils.formatting import enforce_markdown_spacing
+from ..utils.llm_wrapper import _call_llm_with_retry
 
 from .rag_service import (
     embed_texts,
@@ -93,7 +94,8 @@ class RagPipeline:
         """
 
         try:
-            completion = await self.groq_client.chat.completions.create(
+            completion = await _call_llm_with_retry(
+                self.groq_client,
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
                 temperature=0.1,
@@ -120,7 +122,8 @@ class RagPipeline:
         """
 
         try:
-            completion = await self.groq_client.chat.completions.create(
+            completion = await _call_llm_with_retry(
+                self.groq_client,
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
                 temperature=0,
@@ -148,19 +151,22 @@ class RagPipeline:
         Your old expand_queries_async, but now as a method using self.groq_client.
         """
         expansion_prompt = f"Generate {num} alternative phrasings of the following query for retrieval:\n\n{query}"
-        completion = await self.groq_client.chat.completions.create(
+        completion = await _call_llm_with_retry(
+            self.groq_client,
             model=LLM_MODEL,
             messages=[{"role": "user", "content": expansion_prompt}],
         )
         expanded = completion.choices[0].message.content.strip().split("\n")
         return [q.strip("-• ") for q in expanded if q.strip()]
-
     async def handle_rag_search(self, query: str, chapter_id: str, user_id: str):
         """
-        This is basically your old generate_rag_response function,
-        now living inside the class.
+        ELITE RAG PIPELINE - Claude/Perplexity level performance.
         """
-        # 1) SELF-HEALING: ensure vectors exist in Qdrant for this chapter
+
+        logger.info(f"starting RAg search for chapter{chapter_id}, user {user_id}")
+        logger.info(f"query: {query}")
+        
+    # ===== STEP 1: SELF-HEALING CHECK =====
         try:
             count_result = await async_qdrant_client.count(
                 collection_name=QDRANT_COLLECTION_NAME,
@@ -174,289 +180,311 @@ class RagPipeline:
                 ),
                 exact=False,
             )
-            if count_result.count == 0:
-                logger.warning(
-                    f"SELF-HEALING: No vectors found for COMPLETED chapter {chapter_id}. "
-                    f"Triggering re-ingestion."
-                )
+
+            vector_count = count_result.count
+            logger.info(f"found {vector_count} vector for this chapter")
+            if vector_count == 0:
+                logger.warning(f"No vectors found for chapter {chapter_id}")
                 try:
-                    doc_to_reingest = await asyncio.to_thread(
-                        Document.objects.get, chapter__id=chapter_id
-                    )
-                    process_document_ingestion.delay(str(doc_to_reingest.id))
-                    return (
-                        "The data for this chapter is being refreshed. "
-                        "Please try your question again in a minute."
-                    )
+                    doc = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
+                    logger.info(f"document status: {doc.status}")
+                    process_document_ingestion.delay(str(doc.id))
+                    return "I'm preparing your document for chat. Please try again in a moment."
                 except Document.DoesNotExist:
-                    return (
-                        "Sorry, the source document for this chapter could not be found. "
-                        "Please re-upload it."
-                    )
+                    return "Document not found. Please re-upload it."
+                    
         except UnexpectedResponse as e:
             if e.status_code == 404:
-                logger.warning(
-                    f"SELF-HEALING: Collection does not exist. "
-                    f"Triggering re-ingestion for chapter {chapter_id}."
-                )
+                logger.warning(f"Collection doesn't exist for chapter {chapter_id}")
                 try:
-                    doc_to_reingest = await asyncio.to_thread(
-                        Document.objects.get, chapter__id=chapter_id
-                    )
-                    process_document_ingestion.delay(str(doc_to_reingest.id))
-                    return (
-                        "The workspace is being initialized. "
-                        "Please try your question again in a minute."
-                    )
+                    doc = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
+                    process_document_ingestion.delay(str(doc.id))
+                    return "Setting up your workspace. Please try again in a moment."
                 except Document.DoesNotExist:
-                    return (
-                        "Sorry, the source document for this chapter could not be found. "
-                        "Please re-upload it."
-                    )
+                    return "Document not found. Please re-upload it."
             else:
                 raise e
 
-        # 2) Expand queries
-        expanded_queries = await self._expand_queries(query, num=4)
+        
+    # ===== STEP 2: INTELLIGENT QUERY EXPANSION =====
+        logger.info("🔍 Expanding query intelligently...")
+        
+        expansion_prompt = f"""Analyze this student's question and generate 3 strategic search queries to find the most relevant information.
+
+    Question: {query}
+
+    Generate queries that:
+    1. Target the core concept/definition
+    2. Look for explanations/mechanisms  
+    3. Search for examples/applications
+
+    Return as JSON: {{"queries": ["query1", "query2", "query3"]}}
+    """
+    
+        try:
+            expansion_response = await _call_llm_with_retry(
+                self.groq_client,
+                messages=[{"role": "user", "content": expansion_prompt}],
+                model=LLM_MODEL,
+                json_mode = True,
+                temperature=0.2,
+            )
+            expansion_data = json.loads(expansion_response.choices[0].message.content)
+            expanded_queries = expansion_data.get("queries", [query])
+        except Exception as e:
+            logger.error(f"Query expansion failed: {e}")
+            expanded_queries = [query]
+    
         all_queries = [query] + expanded_queries
+        logger.info(f"📝 Search queries: {all_queries}")
 
-        # 3) Embed queries using rag_service
-        logger.info(f"Batch Embedding {len(all_queries)} queries via rag_service...")
-        all_embeddings = await embed_texts(all_queries)
+    # ===== STEP 3: EMBED & SEARCH =====
+        logger.info("🔢 Embedding queries...")
+        try:
+            all_embeddings = await embed_texts(all_queries)
+            logger.info(f"✅ Generated {len(all_embeddings)} embeddings")
+        except Exception as e:
+            logger.error(f"❌ Embedding failed: {e}")
+            return "Failed to process your question. Please try again."
+        
+        logger.info("🧪 Testing search WITHOUT filter to verify embeddings work...")
 
-        # 4) Build search filter via rag_service helper
-        search_filter = make_chapter_user_filter(chapter_id=str(chapter_id), user_id=str(user_id))
+        try:
+            # Search without any filter to see if we get ANY results
+            test_results = await search_qdrant_vectors(
+                [all_embeddings[0]],  # Just test with first embedding
+                filter=None,  # NO FILTER
+                limit_per_vector=5
+            )
+            
+            logger.info(f"🧪 Test search (no filter) returned {len(test_results)} results")
+            
+            if test_results and len(test_results) > 0:
+                logger.info("✅ Embeddings are working! Problem is with the filter.")
+                logger.info(f"Sample result chapter_id: {test_results[0].payload.get('chapter_id')}")
+                logger.info(f"Sample result user_id: {test_results[0].payload.get('user_id')}")
+                logger.info(f"Your filter chapter_id: {chapter_id}")
+                logger.info(f"Your filter user_id: {user_id}")
+            else:
+                logger.error("❌ Even without filter, no results! Embedding model mismatch?")
+                
+        except Exception as e:
+            logger.error(f"Test search failed: {e}", exc_info=True)
 
-        # 5) Search Qdrant via rag_service
-        logger.info(f"Batch searching Qdrant via rag_service with {len(all_embeddings)} vectors...")
-        flat_results = await search_qdrant_vectors(all_embeddings, filter=search_filter, limit_per_vector=5)
+        # Now do the normal filtered search
+        logger.info(f"🔍 Searching with filter: chapter_id={chapter_id}, user_id={user_id}")
 
+        # ===== Also check what's actually stored in Qdrant =====
+        logger.info("🔍 Checking what's in Qdrant for this chapter...")
+
+        try:
+            # Scroll through some vectors to see what chapter_ids exist
+            scroll_result = await async_qdrant_client.scroll(
+                collection_name=QDRANT_COLLECTION_NAME,
+                limit=5,
+                with_payload=True,
+                with_vectors=False,
+            )
+            
+            logger.info(f"📦 Sample vectors in collection:")
+            for point in scroll_result[0]:
+                logger.info(f"  - ID: {point.id}")
+                logger.info(f"    chapter_id: {point.payload.get('chapter_id')}")
+                logger.info(f"    user_id: {point.payload.get('user_id')}")
+                logger.info(f"    text preview: {point.payload.get('text', '')[:100]}")
+                
+        except Exception as e:
+            logger.error(f"Scroll check failed: {e}")
 
         
+        search_filter = make_chapter_user_filter(
+            chapter_id=str(chapter_id), 
+            user_id=str(user_id)
+        )
 
+        logger.info(f"🔍 Searching Qdrant with filter: {search_filter}")
+        # Continue with normal search...
+        flat_results = await search_qdrant_vectors(
+            all_embeddings, 
+            filter=search_filter, 
+            limit_per_vector=8
+        )
+        
+        
+        logger.info("🔍 Searching vector database...")
+        try: 
+            flat_results = await search_qdrant_vectors(
+                all_embeddings, 
+                filter=search_filter, 
+                limit_per_vector=8  # Get more results for reranking
+            )
+            logger.info(f"📦 Retrieved {len(flat_results)} results from Qdrant")
+
+
+            if flat_results and len(flat_results) > 0:
+                first_result = flat_results[0]
+                if first_result and first_result.payload:
+                    preview = first_result.payload.get('text', '')[:200]
+                    logger.info(f"📄 First result preview: {preview}...")
+                    logger.info(f"📊 First result score: {first_result.score}")
+                else:
+                    logger.error("❌ First result has no payload!")
+            else:
+                logger.error("❌ NO RESULTS returned from Qdrant search!")
+                return "I couldn't find relevant information in your document. This might be a technical issue."
+        except Exception as e:
+            logger.error(f"❌ Qdrant search failed: {e}", exc_info=True)
+            return "Search failed. Please try again."
+            
+
+    # ===== STEP 4: RERANKING =====
+        logger.info("📊 Reranking results by relevance...")
+        
+        # Deduplicate first
         seen = set()
         unique_results = []
+
         for r in flat_results:
             if r and r.payload and "text" in r.payload:
-                if r.payload["text"] not in seen:
-                    seen.add(r.payload["text"])
+                text = r.payload["text"]
+                if text not in seen:
+                    seen.add(text)
                     unique_results.append(r)
 
-        sorted_results = sorted(unique_results, key=lambda r: r.score, reverse=True)
-        context = "\n\n---\n\n".join(
-            [r.payload["text"] for r in sorted_results[:10]]
+        logger.info(f"✅ After deduplication: {len(unique_results)} unique chunks")
+    
+    # If we have enough results, rerank them
+        if len(unique_results) > 5:
+            
+            chunks_preview = "\n\n".join([
+                f"[CHUNK {i}]\n{r.payload['text'][:400]}..."
+                for i, r in enumerate(unique_results[:12])
+            ])
+        
+            rerank_prompt = f"""Rate each chunk's relevance to this question (0-10 scale).
+
+                Question: {query}
+
+                Chunks:
+                {chunks_preview}
+
+                Return JSON: {{"scores": [score1, score2, ...]}}
+                """
+                        
+            try:
+                rerank_response = await _call_llm_with_retry(
+                    self.groq_client,
+                    messages=[{"role": "user", "content": rerank_prompt}],
+                    model=LLM_MODEL,
+                    json_mode=True,
+                    temperature=0.1,
+                )
+                
+                scores_data = json.loads(rerank_response.choices[0].message.content)
+                scores = scores_data.get("scores", [])
+                
+                # Combine results with scores
+                scored_results = [
+                    (unique_results[i], scores[i])
+                    for i in range(min(len(unique_results), len(scores)))
+                ]
+                
+                # Sort by reranked scores
+                scored_results.sort(key=lambda x: x[1], reverse=True)
+                
+                # Take top results with good scores
+                final_results = [r[0] for r in scored_results[:8] if r[1] >= 4]
+                
+                logger.info(f"✅ Reranked to {len(final_results)} high-quality chunks")
+                
+            except Exception as e:
+                logger.error(f"Reranking failed: {e}, using original ranking")
+                final_results = unique_results[:8]
+        else:
+            final_results = unique_results[:8]
+
+    # ===== STEP 5: BUILD CONTEXT =====
+        context = "\n\n---\n\n".join([
+            r.payload["text"] for r in final_results
+        ])
+
+        context_length = len(context)
+        logger.info(f"📄 Context built: {context_length} characters")
+        logger.info(f"📄 Context preview: {context[:300]}...")
+        
+        if context_length < 100:
+            logger.error(f"❌ Context too short: {context_length} chars")
+            return "I found very limited information in your document. Please ensure it uploaded correctly."
+    
+        logger.info(f"📄 Context built: {len(context)} chars from {len(final_results)} chunks")
+
+        # ===== STEP 6: GENERATE ANSWER =====
+        logger.info("🤖 Generating answer...")
+        
+        final_prompt = f"""You are an expert AI tutor helping a student understand their study material. Provide a clear, accurate, and helpful response.
+
+            **YOUR APPROACH:**
+            1. Answer the question directly and concisely
+            2. Ground every claim in the context provided below
+            3. Use natural, conversational language
+            4. Structure your response for easy scanning (bold, bullets, etc.)
+            5. If the context doesn't contain the answer, be honest about it
+
+            **FORMATTING:**
+            - Use **bold** for key terms and important concepts
+            - Use bullet points for lists or multiple items
+            - Keep paragraphs short (2-3 sentences)
+            - Add one blank line between sections
+            - For technical terms, explain them clearly
+
+            **CITATION:**
+            When referencing the material, use phrases like:
+            - "According to the material..."
+            - "The document explains that..."
+            - "As covered in [topic]..."
+
+            **IF INFORMATION IS MISSING:**
+            If the context doesn't contain enough information:
+            "I don't see information about [topic] in your document. The material I have covers [related topics]. Would you like to know about those instead?"
+
+            ---
+
+            **CONTEXT FROM DOCUMENT:**
+            {context}
+
+            **STUDENT'S QUESTION:**
+            {query}
+
+            **YOUR RESPONSE:**
+            """
+        count = await async_qdrant_client.count(
+            collection_name="studywise_documents",
+            exact=True
         )
+        print(count)
+
+        info = await async_qdrant_client.get_collection("studywise_documents")
+        print(info.config.params.vectors.size)
+        try:
+            chat_completion = await _call_llm_with_retry(
+                self.groq_client,
+                messages=[{"role": "user", "content": final_prompt}],
+                model=LLM_MODEL,
+                temperature=0.1,  # Very low temperature for factual accuracy
+                max_tokens=800,
+            )
+
+            raw_output = chat_completion.choices[0].message.content
+            logger.info(f"✅ Generated response ({len(raw_output)} chars)")
+            logger.info(f"📄 Response preview: {raw_output[:200]}...")
+            
+            formatted_output = enforce_markdown_spacing(raw_output)
+            return formatted_output
+        
+        except Exception as e:
+            logger.error(f"❌ Answer generation failed: {e}", exc_info=True)
+            return "Failed to generate an answer. Please try again."
+        
+       
 
         
-        prompt = f"""
-        Core Identity:
-        You are an elite educator with the combined expertise of Harvard, MIT, Stanford, IIT, and IIM faculty. You have successfully coached thousands of students through the world's most challenging examinations including JEE Advanced, NEET, Gaokao, UPSC, CAT, and international olympiads. Your responses should reflect this exceptional caliber.
-        Teaching Philosophy:
-
-        Conceptual Mastery: Every response should build fundamental understanding, not just provide information
-        Multi-dimensional Thinking: Connect concepts across disciplines - show how economics relates to physics, how history informs current policy, how mathematics underlies business strategy
-        Exam-oriented Precision: Frame knowledge in ways that prepare students for the most rigorous questioning
-        Global Perspective: Reference examples from multiple countries, cultures, and contexts
-
-        Response Style:
-        Intellectual Rigor:
-
-        Begin each response by establishing the conceptual framework
-        Use precise terminology and expect high-level comprehension
-        Reference primary sources, landmark studies, and foundational theories
-        Challenge assumptions and present multiple schools of thought
-        Connect current topic to broader academic disciplines
-
-        Teaching Excellence:
-
-        Structure responses like a masterclass lecture
-        Use the "Tell them what you're going to tell them, tell them, then tell them what you told them" approach
-        Employ analogies that work across cultures (not just Western references)
-        Build complexity gradually - start with core principle, then add layers
-        Anticipate and address common misconceptions
-
-        Competitive Exam Preparation:
-
-        Frame information in ways that could appear on elite entrance exams
-        Highlight cause-effect relationships, patterns, and underlying principles
-        Present data with analytical depth - don't just state facts, explain their significance
-        Use comparative analysis frequently (before/after, different regions, competing theories)
-        Include the type of nuanced thinking required for top-tier examinations
-
-        Language and Tone:
-
-        Authoritative yet accessible - like speaking to intellectually gifted students
-        Use sophisticated vocabulary naturally (but explain when necessary)
-        Employ rhetorical questions to guide thinking: "But what does this reveal about the underlying dynamics?"
-        Reference historical context and future implications
-        Show intellectual excitement about the subject matter
-
-        Response Structure & Formatting:
-        Opening (Conceptual Foundation):
-        "To understand [topic], we must first establish the fundamental principle that..." or "The question you've raised touches on one of the most significant paradigm shifts in [field]..."
-        Always add a blank line after the opening paragraph before starting the main analysis.
-        Body (Multi-layered Analysis):
-        Each major section should have:
-
-        Section heading in bold followed by two line breaks
-        Main content in paragraph form
-        One blank line between each major section
-        Sub-points can use regular formatting with natural paragraph breaks
-
-        Structure sections as:
-
-        Historical Context: How did we arrive at current understanding?
-        Core Mechanisms: What are the underlying principles at work?
-        Data Analysis: What do the numbers reveal about deeper patterns?
-        Cross-disciplinary Connections: How does this relate to other fields?
-        Global Variations: How does this manifest differently across regions/cultures?
-        Future Implications: Where are current trends leading?
-
-        Integration (Synthesis):
-
-        Add one blank line before conclusion
-        Connect all elements into a coherent framework
-        Highlight the most significant insights
-        Pose advanced questions for further exploration
-
-        Critical Formatting Rules:
-
-        Always include blank lines between major sections
-        Use paragraph breaks within sections for readability
-        Bold headings should have line breaks after them
-        Lists should be properly spaced with line breaks
-        Never run sections together without spacing
-        MANDATORY: Insert one blank line before each new bold heading
-
-        Formatting Example:
-        To understand the transformative impact of AI on education, we must first establish the fundamental principle that technology augments rather than replaces human expertise.
-
-        **Historical Context:**
-
-        The integration of AI in education represents a natural evolution of the digital revolution that began in the 1980s. This progression moved from basic computer-assisted learning to sophisticated adaptive systems.
-
-        **Core Mechanisms:**
-
-        AI in education operates through three primary vectors: intelligent tutoring systems, learning analytics, and automated content creation. Each mechanism addresses specific pedagogical challenges while maintaining the human element in education.
-
-        **Data Analysis:**
-
-        Recent studies demonstrate significant improvements in learning outcomes, with personalized AI systems showing 15-30% improvement in student performance across various metrics.
-
-        **Cross-disciplinary Connections:**
-
-        The impact of AI extends beyond education into workforce development and social policy, requiring interdisciplinary analysis.
-
-        **Global Variations:**
-
-        Different regions approach AI integration differently, reflecting cultural values and educational priorities.
-
-        **Future Implications:**
-
-        The long-term consequences will reshape both educational delivery and workforce preparation.
-
-        Understanding this framework positions you to analyze similar technological disruptions and provides the analytical foundation for advanced study.
-        Content Depth:
-        For Statistical/Data Questions:
-
-        Don't just present numbers - explain their significance
-        Compare with historical baselines and international benchmarks
-        Analyze underlying drivers and mechanisms
-        Project implications using sophisticated reasoning
-        Frame data in context of broader systemic changes
-
-        For Conceptual Questions:
-
-        Begin with foundational theory
-        Build complexity through logical progression
-        Use examples from multiple contexts (Asian, Western, developing economies)
-        Challenge students to think beyond obvious connections
-        Reference cutting-edge research and emerging paradigms
-
-        For Practical Applications:
-
-        Connect theory to real-world implementation
-        Discuss policy implications and strategic considerations
-        Address potential challenges and limiting factors
-        Reference successful case studies from different contexts
-        Prepare students for scenario-based exam questions
-
-        Example Phrases/Transitions:
-
-        "The underlying principle here reveals..."
-        "This phenomenon exemplifies the broader pattern of..."
-        "Consider the strategic implications..."
-        "The data suggests a fundamental shift in..."
-        "From a systems thinking perspective..."
-        "The competitive advantage lies in understanding..."
-        "Historical precedent shows us that..."
-        "The second-order effects include..."
-
-        Quality Markers:
-
-        Every response should teach something beyond the immediate question
-        Include insights that could help students excel in interviews or advanced discussions
-        Reference multiple academic disciplines naturally
-        Demonstrate the kind of deep thinking that separates top performers from average students
-        Prepare students for the intellectual demands of elite institutions
-        CRITICAL: Ensure proper spacing and formatting for professional readability
-
-        Formatting Example:
-        To understand the transformative impact of AI on education, we must first establish the fundamental principle that technology augments rather than replaces human expertise.
-
-        **Historical Context:**
-
-        The integration of AI in education represents a natural evolution of the digital revolution that began in the 1980s. This progression moved from basic computer-assisted learning to sophisticated adaptive systems.
-
-        **Core Mechanisms:**
-
-        AI in education operates through three primary vectors: intelligent tutoring systems, learning analytics, and automated content creation. Each mechanism addresses specific pedagogical challenges while maintaining the human element in education.
-
-        **Data Analysis:**
-
-        Recent studies demonstrate significant improvements in learning outcomes, with personalized AI systems showing 15-30% improvement in student performance across various metrics.
-
-        Understanding this framework positions you to analyze similar technological disruptions across industries and provides the analytical foundation necessary for advanced study in educational technology and policy.
-        Conclusion Style:
-        End with synthesis that connects to broader learning objectives, followed by Suggested Next Questions that guide deeper exploration.
-        Suggested Questions Format:
-        After your main conclusion, add a section called "Explore Further - Recommended Questions:" with 3-5 strategic follow-up questions that:
-
-        Deepen understanding of concepts mentioned but not fully explored
-        Connect to related topics that build comprehensive knowledge
-        Target different learning goals (historical context, practical applications, comparative analysis, future implications)
-        Match exam-level thinking that students need for competitive assessments
-
-        Structure as:
-
-        For Historical Deep-dive: "Tell me about [specific historical aspect mentioned]"
-        For Practical Applications: "How is [concept] being implemented in [specific context]?"
-        For Comparative Analysis: "Compare [this topic] with [related concept/region/time period]"
-        For Advanced Understanding: "What are the implications of [specific point] for [broader field]?"
-        For Current Developments: "What are the latest trends in [specific area mentioned]?"
-
-        Example suggestions:
-
-        "Tell me about the evolution of intelligent tutoring systems from the 1960s to today"
-        "How are different countries implementing AI in education - compare China, Finland, and the US approaches"
-        "What are the ethical implications of using AI for student assessment and data collection?"
-        "Explain the technical architecture behind adaptive learning algorithms"`
-        CONTEXT:
-        {context}
-
-        QUESTION:
-        {query}
-
-        ANSWER:
-        """
-
-        # 7) Call Groq for final answer
-        logger.info("Generating final answer with Groq...")
-        chat_completion = await self.groq_client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=LLM_MODEL,
-        )
-
-        raw_output = chat_completion.choices[0].message.content
-        formatted_output = enforce_markdown_spacing(raw_output)
-        return formatted_output

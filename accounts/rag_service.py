@@ -8,7 +8,7 @@ from qdrant_client import models
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "text-embedding-004"  # your embedding model
+EMBEDDING_MODEL = "text-embedding-004" 
 
 async def embed_texts(texts: List[str]) -> List[List[float]]:
     """
@@ -16,11 +16,21 @@ async def embed_texts(texts: List[str]) -> List[List[float]]:
     Returns list of vectors aligned with texts.
     """
     loop = asyncio.get_running_loop()
-    # run in thread to avoid blocking event loop if genai is sync
-    result = await loop.run_in_executor(None, lambda: genai.embed_content(
-        model=f"models/{EMBEDDING_MODEL}", content=texts, task_type="RETRIEVAL_QUERY"
-    ))
-    return result["embedding"]
+    def _embed():
+        response = genai.embed_content(
+            model=f"models/{EMBEDDING_MODEL}",
+            content=texts,
+            task_type="RETRIEVAL_QUERY"
+        )
+        return response["embedding"]
+
+    embeddings = await loop.run_in_executor(None, _embed)
+
+    # 🔥 CRITICAL: Ensure correct shape
+    if isinstance(texts, list):
+        return embeddings  # list of vectors
+    else:
+        return [embeddings]
 
 async def search_qdrant_vectors(vectors: List[List[float]], filter: models.Filter, limit_per_vector:int=5):
     """

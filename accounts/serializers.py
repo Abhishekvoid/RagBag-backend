@@ -32,10 +32,6 @@ class RegisterSerializers(BaseUserCreateSerializer):
 
 
 
-
-
-
-
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
