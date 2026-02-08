@@ -99,6 +99,7 @@ class RagPipeline:
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
                 temperature=0.1,
+                timeout=5.0,
             )
             return completion.choices[0].message.content.strip()
         except Exception as e:
@@ -127,6 +128,7 @@ class RagPipeline:
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
                 temperature=0,
+                timeout=3.0,
             )
             intent = completion.choices[0].message.content.strip().lower()
             if intent not in ["greeting", "summary", "ambiguous", "question"]:
@@ -155,6 +157,7 @@ class RagPipeline:
             self.groq_client,
             model=LLM_MODEL,
             messages=[{"role": "user", "content": expansion_prompt}],
+            timeout=5.0,
         )
         expanded = completion.choices[0].message.content.strip().split("\n")
         return [q.strip("-• ") for q in expanded if q.strip()]
@@ -472,6 +475,7 @@ class RagPipeline:
                 model=LLM_MODEL,
                 temperature=0.1,  # Very low temperature for factual accuracy
                 max_tokens=800,
+                timeout=30.0,
             )
 
             raw_output = chat_completion.choices[0].message.content
