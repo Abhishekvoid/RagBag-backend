@@ -14,19 +14,14 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards
 import os
-from dotenv import load_dotenv
 
 import google.generativeai as genai
 from .tasks import process_document_ingestion, create_chapter_from_document, process_document_for_existing_chapter
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
-from utils.formatting import enforce_markdown_spacing
 import json
-from django.http import Http404
-from django.utils.decorators import method_decorator
-from utils.timing import time_sync, time_async
-from django.views.decorators.csrf import csrf_exempt
+
 logger = logging.getLogger(__name__)
 
 from .rag_pipeline import RagPipeline
