@@ -14,7 +14,8 @@ from .ai_clients import async_qdrant_client  # we’ll still use self.groq_clien
 from .models import Document
 from .tasks import process_document_ingestion
 from utils.formatting import enforce_markdown_spacing
-from ..utils.llm_wrapper import _call_llm_with_retry
+
+from utils.llm_gateway import ask_llm, LLMUnavailable
 
 from .rag_service import (
     embed_texts,
@@ -94,7 +95,7 @@ class RagPipeline:
         """
 
         try:
-            completion = await _call_llm_with_retry(
+            completion = await ask_llm(
                 self.groq_client,
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
@@ -102,6 +103,10 @@ class RagPipeline:
                 timeout=5.0,
             )
             return completion.choices[0].message.content.strip()
+        
+        except LLMUnavailable:
+            logger.info("Contextualization skipped - LLM unaviavble")
+            return query
         except Exception as e:
             logger.error(f"Contextualization failed: {e}")
             return query
@@ -123,7 +128,7 @@ class RagPipeline:
         """
 
         try:
-            completion = await _call_llm_with_retry(
+            completion = await ask_llm(
                 self.groq_client,
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
@@ -134,6 +139,10 @@ class RagPipeline:
             if intent not in ["greeting", "summary", "ambiguous", "question"]:
                 return "question"
             return intent
+        
+        except LLMUnavailable:
+            logger.info(f"cannot decide the route -> llm is unavailable")
+            return "question"
         except Exception as e:
             logger.error(f"Intent routing failed: {e}")
             return "question"
@@ -153,7 +162,7 @@ class RagPipeline:
         Your old expand_queries_async, but now as a method using self.groq_client.
         """
         expansion_prompt = f"Generate {num} alternative phrasings of the following query for retrieval:\n\n{query}"
-        completion = await _call_llm_with_retry(
+        completion = await ask_llm(
             self.groq_client,
             model=LLM_MODEL,
             messages=[{"role": "user", "content": expansion_prompt}],
@@ -162,9 +171,7 @@ class RagPipeline:
         expanded = completion.choices[0].message.content.strip().split("\n")
         return [q.strip("-• ") for q in expanded if q.strip()]
     async def handle_rag_search(self, query: str, chapter_id: str, user_id: str):
-        """
-        ELITE RAG PIPELINE - Claude/Perplexity level performance.
-        """
+       
 
         logger.info(f"starting RAg search for chapter{chapter_id}, user {user_id}")
         logger.info(f"query: {query}")
@@ -225,7 +232,7 @@ class RagPipeline:
     """
     
         try:
-            expansion_response = await _call_llm_with_retry(
+            expansion_response = await ask_llm(
                 self.groq_client,
                 messages=[{"role": "user", "content": expansion_prompt}],
                 model=LLM_MODEL,
@@ -234,6 +241,10 @@ class RagPipeline:
             )
             expansion_data = json.loads(expansion_response.choices[0].message.content)
             expanded_queries = expansion_data.get("queries", [query])
+
+        except LLMUnavailable:
+            logger.info(f"Query Expansion failed -> llm unavialable")
+            expanded_queries = [query]
         except Exception as e:
             logger.error(f"Query expansion failed: {e}")
             expanded_queries = [query]
@@ -375,7 +386,7 @@ class RagPipeline:
                 """
                         
             try:
-                rerank_response = await _call_llm_with_retry(
+                rerank_response = await ask_llm(
                     self.groq_client,
                     messages=[{"role": "user", "content": rerank_prompt}],
                     model=LLM_MODEL,
@@ -469,7 +480,7 @@ class RagPipeline:
         info = await async_qdrant_client.get_collection("studywise_documents")
         print(info.config.params.vectors.size)
         try:
-            chat_completion = await _call_llm_with_retry(
+            chat_completion = await ask_llm(
                 self.groq_client,
                 messages=[{"role": "user", "content": final_prompt}],
                 model=LLM_MODEL,
@@ -484,6 +495,10 @@ class RagPipeline:
             
             formatted_output = enforce_markdown_spacing(raw_output)
             return formatted_output
+        
+        except LLMUnavailable:
+            logger.warning("Answer generation skipped — LLM unavailable")
+            return "AI is temporarily unavailable. Please try again shortly."
         
         except Exception as e:
             logger.error(f"❌ Answer generation failed: {e}", exc_info=True)
