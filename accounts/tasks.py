@@ -15,6 +15,7 @@ from qdrant_client.models import PointStruct
 from groq import Groq
 from .models import Document, Chapter
 
+
 import pytesseract
 from pdf2image import convert_from_bytes
 from asgiref.sync import async_to_sync
@@ -29,7 +30,7 @@ load_dotenv()
 QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
 GOOGLE_API_KEY = getattr(settings, "GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
 GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 LLM_MODEL = "llama-3.1-8b-instant" 
 QDRANT_COLLECTION_NAME = "studywise_documents"
 TOKENIZER_NAME = "cl100k_base"

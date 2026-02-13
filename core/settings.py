@@ -17,6 +17,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY must be set in .env file")
 
+
 ALLOWED_HOSTS = [
     host.strip() 
     for host in os.getenv('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost').split(',') 

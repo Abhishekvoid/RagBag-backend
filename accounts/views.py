@@ -15,6 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards
 import os
 
+
 import google.generativeai as genai
 from .tasks import process_document_ingestion, create_chapter_from_document, process_document_for_existing_chapter
 from rest_framework import parsers
@@ -30,13 +31,13 @@ from .ai_clients import qdrant_client, GROQ_API_KEY, groq_client
 rag_pipeline = RagPipeline(
     groq_api_key=GROQ_API_KEY,
     qdrant_client=qdrant_client,
-    embedding_model="text-embedding-004",
+    embedding_model="gemini-embedding-001",
 )
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION_NAME = "studywise_documents"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 LLM_MODEL = "llama-3.1-8b-instant"
 
 

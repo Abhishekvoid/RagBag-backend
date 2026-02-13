@@ -14,6 +14,8 @@ from .ai_clients import async_qdrant_client  # we’ll still use self.groq_clien
 from .models import Document
 from .tasks import process_document_ingestion
 from utils.formatting import enforce_markdown_spacing
+import time
+import uuid
 
 from utils.llm_gateway import ask_llm, LLMUnavailable
 
@@ -28,8 +30,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 LLM_MODEL = "llama-3.1-8b-instant"
-EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 QDRANT_COLLECTION_NAME = "studywise_documents"
+
+
 
 
 class RagPipeline:
@@ -54,98 +58,254 @@ class RagPipeline:
 
     async def run(self, user_query, chat_history, chapter_id, user_id):
         # step 1: contextualization
-        refined_query = await self.contextualize_query(user_query, chat_history)
-        logger.info(f"Refined query: {refined_query}")
 
-        # step 2: Router
-        intent = await self.route_query(refined_query)
-        logger.info(f"Detected intent: {intent}")
+        request_id = str(uuid.uuid4())
+        start_time = time.monotonic()
+        status = "unknown"
 
-        # step 3: Execute strategy
-        if intent == "greeting":
-            return await self.handle_greeting(user_query)
-        elif intent == "summary":
-            return await self.handle_summary(chapter_id, user_id)
-        elif intent == "ambiguous":
-            return "I'm not sure I understand. Could you clarify your question about this document?"
-        else:
-            return await self.handle_rag_search(refined_query, chapter_id, user_id)
+        logger.info(
+            "Rag_request_stared",
+            extra= {
+                "event": "Rag_request_started",
+                "request_id": request_id,
+                "user_id": str(user_id),
+                "chapter_id": str(chapter_id),
+            }
+        )
+        try:
+            refined_query = await self.contextualize_query(user_query, chat_history, request_id)
+            logger.info(f"Refined query: {refined_query}")
 
-    async def contextualize_query(self, query, history):
+            # step 2: Router
+            intent = await self.route_query(refined_query, request_id)
+            logger.info(f"Detected intent: {intent}")
+
+            # step 3: Execute strategy
+            if intent == "greeting":
+                result =  await self.handle_greeting(user_query)
+            elif intent == "summary":
+                result =  await self.handle_summary(chapter_id, user_id)
+            elif intent == "ambiguous":
+                result =  "I'm not sure I understand. Could you clarify your question about this document?"
+            else:
+                result = await self.handle_rag_search(refined_query, chapter_id, user_id, request_id)
+            
+            status = "sucess"
+            return result
+        except Exception as e:
+            status = "failed"
+
+            logger.exception(
+                "rag_request_failed",
+                extra={
+                    "event": "rag_request_failed",
+                    "request_id": request_id,
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                }
+            )
+
+            raise
+
+        finally:
+            total_latency_ms = (time.monotonic() - start_time) * 1000
+
+
+            logger.info(
+                 "rag_request_completed",
+                extra={
+                    "event": "rag_request_completed",
+                    "request_id": request_id,
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                    "status": status,
+                    "total_latency_ms": round(total_latency_ms, 2),
+                }
+            )
+
+    async def contextualize_query(self, query, history, request_id, user_id, chapter_id):
         """
         Turn last user question into a standalone question using chat history.
         """
-        if not history:
-            return query
 
-        # use last few messages – you can tweak slice later
-        history_context = "\n".join([f"{msg.sender}: {msg.text}" for msg in history[-5:]])
+        start_time = time.monotonic()
+        status = "unknown"
+        result = None
 
-        prompt = f""" 
-        Given the following chat history and the latest user question, 
-        rewrite the question to be a standalone query that can be understood without the history.
-        Do NOT answer the question. Just rewrite it.
+        logger.info(
+            "contextualization_request_stared",
+            extra= {
+                "event": "contextualization_start",
+                "stage": "contexttualization",
+                "request_id": request_id,
+                "user_id": str(user_id),
+                "chapter_id": str(chapter_id),
+            }
+        )
+        try: 
+            if not history:
+                result = query
+                status = "skipped"
 
-        Chat History:
-        {history_context}
+            else:
+                # use last few messages – you can tweak slice later
+                history_context = "\n".join([f"{msg.sender}: {msg.text}" for msg in history[-5:]])
 
-        user Question: {query}
+                prompt = f""" 
+                Given the following chat history and the latest user question, 
+                rewrite the question to be a standalone query that can be understood without the history.
+                Do NOT answer the question. Just rewrite it.
 
-        standalone Question:
-        """
+                Chat History:
+                {history_context}
+
+                user Question: {query}
+
+                standalone Question:
+                """
+
+                try:
+                    completion = await ask_llm(
+                        self.groq_client,
+                        messages=[{"role": "user", "content": prompt}],
+                        model=LLM_MODEL,
+                        temperature=0.1,
+                        timeout=5.0,
+                    )
+                    result =  completion.choices[0].message.content.strip()
+
+                    status = "sucess"
+                    
+                
+                except LLMUnavailable:
+                    logger.info("Contextualization skipped - LLM unaviavble")
+                    result = query
+                    status = "degraded"
+                except Exception as e:
+                    logger.error(f"Contextualization failed: {e}")
+                    result =  query
+                    status = "degraded"
+        except Exception as e:
+
+            status = "failed"
+            logger.exception(
+                "Contextualization failed",
+                extra = {
+                    "event": "contextualization_failed",
+                    "stage": "contextualization",
+                    "request_id": request_id,
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                }
+            )
+            raise
+
+        finally:
+            total_latency_ms = (time.monotonic() - start_time) * 1000
+
+            logger.info(
+                 "contextualization completed",
+                extra={
+                    "event": "contextualization completed",
+                    "stage": "contextualization",
+                    "request_id": request_id,
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                    "status": status,
+                    "total_latency_ms": round(total_latency_ms, 2),
+                }
+            )
+        return result
+
+    async def route_query(self, query, request_id,  user_id, chapter_id):
+
+
+        start_time = time.monotonic()
+        status = "unknown"
+        result = None
 
         try:
-            completion = await ask_llm(
-                self.groq_client,
-                messages=[{"role": "user", "content": prompt}],
-                model=LLM_MODEL,
-                temperature=0.1,
-                timeout=5.0,
+            """
+            Classifies the query intent.
+            """
+            logger.info(
+                "routing started",
+                extra = {
+
+                    "event": "routing_started",
+                    "stage": "routing",
+                    "request_id": str(request_id),
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                }
             )
-            return completion.choices[0].message.content.strip()
-        
-        except LLMUnavailable:
-            logger.info("Contextualization skipped - LLM unaviavble")
-            return query
+            
+            prompt = f""" 
+            Classify the following user query into one of these categories:
+            1. "greeting" (Hello, Hi, who are you)
+            2. "summary" (Summarize this, what is this doc about, give me an overview)
+            3. "ambiguous" (Vague requests like "explain", "more", "tell me")
+            4. "question" (Specific questions about content, definitions, concepts)
+
+            Query: {query}
+
+            Return only the category name (lowercase)
+            """
+
+            try:
+                completion = await ask_llm(
+                    self.groq_client,
+                    messages=[{"role": "user", "content": prompt}],
+                    model=LLM_MODEL,
+                    temperature=0,
+                    timeout=3.0,
+                )
+                intent = completion.choices[0].message.content.strip().lower()
+                if intent not in ["greeting", "summary", "ambiguous", "question"]:
+                    result =  "question"
+                else:
+                    result =  intent
+
+                status = "sucess"
+            
+            except LLMUnavailable:
+                logger.info(f"cannot decide the route -> llm is unavailable")
+                result = "question"
+                status = "degraded"
+            except Exception as e:
+                logger.error(f"Intent routing failed: {e}")
+                result = "question"
+                status = "degraded"
         except Exception as e:
-            logger.error(f"Contextualization failed: {e}")
-            return query
+            
+            status = "failed"
 
-    async def route_query(self, query):
-        """
-        Classifies the query intent.
-        """
-        prompt = f""" 
-        Classify the following user query into one of these categories:
-        1. "greeting" (Hello, Hi, who are you)
-        2. "summary" (Summarize this, what is this doc about, give me an overview)
-        3. "ambiguous" (Vague requests like "explain", "more", "tell me")
-        4. "question" (Specific questions about content, definitions, concepts)
-
-        Query: {query}
-
-        Return only the category name (lowercase)
-        """
-
-        try:
-            completion = await ask_llm(
-                self.groq_client,
-                messages=[{"role": "user", "content": prompt}],
-                model=LLM_MODEL,
-                temperature=0,
-                timeout=3.0,
+            logger.exception(
+                "routing failed",
+                extra={
+                    "event": "routing_failed",
+                    "stage": "routing",
+                    "request_id": str(request_id),
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                }
             )
-            intent = completion.choices[0].message.content.strip().lower()
-            if intent not in ["greeting", "summary", "ambiguous", "question"]:
-                return "question"
-            return intent
+
+            raise
+        finally:
+            total_latency_ms = (time.monotonic() - start_time) * 1000
         
-        except LLMUnavailable:
-            logger.info(f"cannot decide the route -> llm is unavailable")
-            return "question"
-        except Exception as e:
-            logger.error(f"Intent routing failed: {e}")
-            return "question"
+            logger.info(
+                "routing query completed", extra = {
+                 "event": "routing completed",
+                    "stage": "routing",
+                    "request_id": request_id,
+                    "user_id": str(user_id),
+                    "chapter_id": str(chapter_id),
+                    "status": status,
+                    "total_latency_ms": round(total_latency_ms, 2), }
+            )       
+        return result     
 
     async def handle_greeting(self, query):
         return (

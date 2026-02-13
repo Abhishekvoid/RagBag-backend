@@ -6,9 +6,10 @@ from .ai_clients import async_groq_client, async_qdrant_client
 import google.generativeai as genai
 from qdrant_client import models
 
+
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "text-embedding-004" 
+EMBEDDING_MODEL = "gemini-embedding-001" 
 
 async def embed_texts(texts: List[str]) -> List[List[float]]:
     """
