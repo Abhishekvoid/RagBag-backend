@@ -43,4 +43,4 @@ class CircuitBreaker:
     def record_sucess(self):
         redis_client.delete(self.key)
 
-llm_circuit_breaker = CircuitBreaker()
+llm_circuit_breaker = CircuitBreaker("llm")
