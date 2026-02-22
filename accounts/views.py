@@ -16,7 +16,7 @@ from .models import ChatMessage, ChatSession, Document, Subject, Chapter, Genera
 import os
 
 
-import google.generativeai as genai
+
 from .tasks import process_document_ingestion, create_chapter_from_document, process_document_for_existing_chapter
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
