@@ -6,28 +6,36 @@ redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 class CircuitBreaker:
 
-    def __init__(self, name, failure_threshold =3, cooldown=60):
+    
 
-        self.key = f"cb:{name}"
-        self.failure_threshold = failure_threshold 
-        self.cooldown = cooldown    
+    def __init__(self, service_name:str, failure_threshold =3, cooldown=60):
+       
+        
+        self.key = f"cb:{service_name}"
+        self.failure_threshold = failure_threshold
+        self.cooldown = cooldown
+        
 
-    def allow_request(self) -> bool:
+    def is_open(self) -> bool:
         data = redis_client.hgetall(self.key)
 
         if not data:
+            return False  
            
         
-            state = data.get("state")
-
-            if state == "open":
-                opened_at = float(data.get("opened_at", 0))
-                if time.time() - opened_at > self.cooldown:
-                    redis_client.hset(self.key, "state", "half-open")
-                return True
-            return False
-        return True
+        state = data.get("state")
+        if state == "open":
+            opened_at = float(data.get("opened_at", 0))
+            if time.time() - opened_at > self.cooldown:
+                redis_client.hset(self.key, "state", "half-open")
+                return False
+            return True
+        return False           
+           
+    def allow_request(self) -> bool:
+        return not self.is_open()
     
+
     def record_failure(self):
         failures = redis_client.hincrby(self.key, "failures", 1)
         if failures >= self.failure_threshold:
@@ -40,7 +48,8 @@ class CircuitBreaker:
                 }
             )
     
-    def record_sucess(self):
+    def record_success(self):
         redis_client.delete(self.key)
 
+tei_circuit_breaker = CircuitBreaker("tei-embedding")
 llm_circuit_breaker = CircuitBreaker("llm")
