@@ -1,10 +1,12 @@
 from .llm_wrapper import _call_llm_with_retry
-from .circuit_breaker import CircuitBreaker
+from .circuit_breaker import CircuitBreaker, llm_circuit_breaker
 import logging
-from llm_load_control import llm_slot, SystemOverloaded
+from .llm_load_control import SlotManager, SystemOverload, llm_slot_manager
 
 logger =  logging.getLogger(__name__)
 
+
+llm_circuit_breaker = CircuitBreaker("llm")
 class LLMUnavailable(Exception):
     pass
 
@@ -14,21 +16,21 @@ async def ask_llm(groq_client,messages,*,model,json_mode=False,**kwargs):
 
     # circuit breaker gate
 
-    if not CircuitBreaker.allow_request():
+    if not CircuitBreaker.is_open(self):
         logging.warning("LLM circuit OPEN - blocking  request")
         raise LLMUnavailable("LLM temporarily unavailable")
 
-
+ 
     try:
 
-        async with llm_slot():
+        async with llm_slot_manager():
 
             response = await _call_llm_with_retry(groq_client,messages=messages,model=model,json_mode=json_mode,**kwargs)
 
             # sucess -> reset breaker
             CircuitBreaker.record_sucess()
             return response
-    except SystemOverloaded:
+    except SystemOverload:
         raise LLMUnavailable("system under heavy load")
     except Exception as e:
 
