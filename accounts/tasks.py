@@ -6,7 +6,7 @@ from celery import shared_task
 from django.conf import settings
 from django.core.files.storage import default_storage
 from qdrant_client import QdrantClient, models
-import google.generativeai as genai
+
 import PyPDF2
 import docx
 from pptx import Presentation
@@ -21,6 +21,10 @@ from pdf2image import convert_from_bytes
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 import uuid
+
+
+from utils.tei_embedding import TEIEmbeddingClient
+_tei_client = TEIEmbeddingClient()
 # ---------------------------------------------
 
 BATCH_SIZE = 100
@@ -28,9 +32,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
-GOOGLE_API_KEY = getattr(settings, "GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
 GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-EMBEDDING_MODEL = "gemini-embedding-001"
 LLM_MODEL = "llama-3.1-8b-instant" 
 QDRANT_COLLECTION_NAME = "studywise_documents"
 TOKENIZER_NAME = "cl100k_base"
@@ -52,10 +54,7 @@ def _get_clients():
         _groq_client = Groq(api_key=GROQ_API_KEY)
     return _qdrant_client, _tokenizer, _groq_client
 
-def _initialize_google_ai():
-    if not GOOGLE_API_KEY:
-        raise ValueError("GOOGLE_API_KEY is not set.")
-    genai.configure(api_key=GOOGLE_API_KEY)
+
 
 # ---- HELPER FUNCTIONS -------
 
@@ -226,7 +225,7 @@ def create_chapter_from_document(self, document_id: str):
         doc.save(update_fields=['status'])
 
         _, _, groq_client = _get_clients()
-        _initialize_google_ai()
+        
 
         logger.info(f"[{document_id}] Extracting text from file: {doc.file.name}")
         document_text = get_text_from_file(doc.file.name, doc.file_type)
@@ -317,9 +316,7 @@ def process_document_ingestion(self, document_id: str):
     
     try:
         qdrant_client, tokenizer, _ = _get_clients()
-        _initialize_google_ai()
         
-        # --- NEW: Text extraction happens here first and is saved to the database. ---
         if not doc.extracted_text:
             logger.info(f"[{document_id}] Extracting text for ingestion...")
             doc.extracted_text = get_text_from_file(doc.file.name, doc.file_type)
@@ -332,21 +329,16 @@ def process_document_ingestion(self, document_id: str):
         if not text_chunks:
             raise ValueError("Text could not be split into chunks.")
             
-        logger.info(f"[{document_id}] Generating embeddings for {len(text_chunks)} chunks...")
-        response = genai.embed_content(
-            model=f"models/{EMBEDDING_MODEL}",
-            content=text_chunks,
-            task_type="RETRIEVAL_DOCUMENT"
-        )
-        all_embeddings = response['embedding']
-        vector_size = len(all_embeddings[0])
+        logger.info(f"[{document_id}] Generating embeddings for {len(text_chunks)} chunks via TEI...")
+        all_embeddings = async_to_sync(_tei_client.embed_texts)(text_chunks)
+        
 
         try:
             qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
         except Exception:
             qdrant_client.recreate_collection(
                 collection_name=QDRANT_COLLECTION_NAME,
-                vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
+                vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE)
             )
 
         points_batch = []
