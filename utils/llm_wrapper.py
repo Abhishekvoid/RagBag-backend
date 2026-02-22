@@ -28,7 +28,7 @@ RETRYABLE_ERRORS = (
 )
 
 
-@retry(
+@retry( 
         retry=retry_if_exception_type(RETRYABLE_ERRORS),
         wait=wait_exponential_jitter(initial=1, max=10), # Wait 1s, 2s, 4s... + jitter
         stop=stop_after_attempt(3), # Give up after 3 tries

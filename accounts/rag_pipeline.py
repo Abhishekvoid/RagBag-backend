@@ -73,11 +73,11 @@ class RagPipeline:
             }
         )
         try:
-            refined_query = await self.contextualize_query(user_query, chat_history, request_id)
+            refined_query = await self.contextualize_query(user_query, chat_history, request_id, user_id, chapter_id)
             logger.info(f"Refined query: {refined_query}")
 
             # step 2: Router
-            intent = await self.route_query(refined_query, request_id)
+            intent = await self.route_query(refined_query, request_id, user_id, chapter_id)
             logger.info(f"Detected intent: {intent}")
 
             # step 3: Execute strategy
@@ -330,7 +330,7 @@ class RagPipeline:
         )
         expanded = completion.choices[0].message.content.strip().split("\n")
         return [q.strip("-• ") for q in expanded if q.strip()]
-    async def handle_rag_search(self, query: str, chapter_id: str, user_id: str):
+    async def handle_rag_search(self, query: str, chapter_id: str, user_id: str, request_id=None):
        
 
         logger.info(f"starting RAg search for chapter{chapter_id}, user {user_id}")

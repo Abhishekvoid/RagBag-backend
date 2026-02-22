@@ -16,7 +16,6 @@ def _clean_env(name: str):
     return v
 
 GROQ_API_KEY = _clean_env("GROQ_API_KEY")
-GOOGLE_API_KEY = _clean_env("GOOGLE_API_KEY")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 
 
@@ -25,17 +24,13 @@ if GROQ_API_KEY:
 else:
     logger.warning("GROQ_API_KEY not found")
 
-if GOOGLE_API_KEY:
-    logger.info("GOOGLE_API_KEY loaded (masked): %s...%s", GOOGLE_API_KEY[:4], GOOGLE_API_KEY[-4:])
-else:
-    logger.warning("GOOGLE_API_KEY not found")
+
 
 from groq import Groq, AsyncGroq
 from qdrant_client import QdrantClient, AsyncQdrantClient
-import google.generativeai as genai
 
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
+
+
 
 groq_client       = Groq(api_key=GROQ_API_KEY)       if GROQ_API_KEY   else None
 async_groq_client = AsyncGroq(api_key=GROQ_API_KEY)  if GROQ_API_KEY   else None

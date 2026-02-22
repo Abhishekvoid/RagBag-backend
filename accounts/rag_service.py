@@ -3,7 +3,7 @@ import logging
 import asyncio
 from typing import List
 from .ai_clients import async_groq_client, async_qdrant_client
-import google.generativeai as genai
+
 from qdrant_client import models
 
 
