@@ -17,7 +17,7 @@ import os
 
 
 
-from .tasks import process_document_ingestion, create_chapter_from_document, process_document_for_existing_chapter
+from .tasks import  create_chapter_from_document, process_document_for_existing_chapter
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
@@ -36,8 +36,7 @@ rag_pipeline = RagPipeline(
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION_NAME = "studywise_documents"
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-EMBEDDING_MODEL = "gemini-embedding-001"
+
 LLM_MODEL = "llama-3.1-8b-instant"
 
 
@@ -45,15 +44,6 @@ v = os.getenv("GROQ_API_KEY")
 logger.info("GROQ_API_KEY repr: %s", repr(v) if v is not None else "None")
 if v:
     logger.info("GROQ_API_KEY masked: %s...%s", v[:4], v[-4:])
-
-
-try:
-    if not GOOGLE_API_KEY:
-        raise ValueError("google api key is not set")
-    genai.configure(api_key=GOOGLE_API_KEY)
-except Exception as e:
-    logger.critical(f"Failed to configure Google GenAI: {e}")
-
 
 
 class RegisterAPIView(APIView):
