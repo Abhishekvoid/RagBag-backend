@@ -217,7 +217,7 @@ class RagPipeline:
             )
         return result
 
-    async def route_query(self, query, request_id,  user_id, chapter_id):
+    async def route_query( self, query, request_id,  user_id, chapter_id):
 
 
         start_time = time.monotonic()

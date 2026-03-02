@@ -9,7 +9,7 @@ from qdrant_client import models
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "gemini-embedding-001" 
+
 
 async def embed_texts(texts: List[str]) -> List[List[float]]:
     """
