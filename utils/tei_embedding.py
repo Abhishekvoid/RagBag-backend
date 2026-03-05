@@ -47,6 +47,8 @@ class TEIEmbeddingClient:
         if not texts:
             return []
         
+        if isinstance(texts, str):
+            texts = [texts]
 
         if self.cb.is_open():
             raise EmbeddingServiceUnavailable("Tei circuit is open")
@@ -54,11 +56,11 @@ class TEIEmbeddingClient:
         async with self.slot_manager.slot():
             
             start = time.perf_counter()
-          
-            response = await self.client.post(
-                    TEI_URL,
-                    json = {"input": texts},
-                )
+            async with httpx.AsyncClient(timeout=TEI_TIMEOUT) as client:
+                response = await self.client.post(
+                        TEI_URL,
+                        json = {"inputs": texts},
+                    )
 
             response.raise_for_status()
             embeddings = response.json()

@@ -1,37 +1,21 @@
 # backend/rag_service.py
 import logging
 import asyncio
-from typing import List
+from typing import List, Union 
 from .ai_clients import async_groq_client, async_qdrant_client
-
+from utils.tei_embedding import TEIEmbeddingClient
 from qdrant_client import models
 
-
+tei_client = TEIEmbeddingClient()
 logger = logging.getLogger(__name__)
 
 
 
-async def embed_texts(texts: List[str]) -> List[List[float]]:
-    """
-    Produce embeddings for a list of texts using google genai embed_content.
-    Returns list of vectors aligned with texts.
-    """
-    loop = asyncio.get_running_loop()
-    def _embed():
-        response = genai.embed_content(
-            model=f"models/{EMBEDDING_MODEL}",
-            content=texts,
-            task_type="RETRIEVAL_QUERY"
-        )
-        return response["embedding"]
-
-    embeddings = await loop.run_in_executor(None, _embed)
-
-    # 🔥 CRITICAL: Ensure correct shape
-    if isinstance(texts, list):
-        return embeddings  # list of vectors
-    else:
-        return [embeddings]
+async def embed_texts(texts: Union[str, List[str]]) -> List[List[float]]:
+    if isinstance(texts, str):
+        texts = [texts]  
+    embeddings = await tei_client.embed_texts(texts)
+    return embeddings
 
 async def search_qdrant_vectors(vectors: List[List[float]], filter: models.Filter, limit_per_vector:int=5):
     """

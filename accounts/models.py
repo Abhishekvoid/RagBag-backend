@@ -170,4 +170,4 @@ class GenerateFlashCards(models.Model):
         ordering = ['created_at']
 
     def __str__(self):
-        return f"flashcard for chapter{self.chapter.title} (User: {self.user.email})"
+        return f"flashcard for chapter{self.chapter.name} (User: {self.user.email})"
