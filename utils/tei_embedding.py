@@ -56,8 +56,8 @@ class TEIEmbeddingClient:
         async with self.slot_manager.slot():
             
             start = time.perf_counter()
-            async with httpx.AsyncClient(timeout=TEI_TIMEOUT) as client:
-                response = await self.client.post(
+            async with httpx.AsyncClient(timeout=TEI_TIMEOUT,limits=httpx.Limits(max_connections=100)) as client:
+                response = await client.post(
                         TEI_URL,
                         json = {"inputs": texts},
                     )

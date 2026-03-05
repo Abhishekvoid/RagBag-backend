@@ -30,7 +30,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 LLM_MODEL = "llama-3.1-8b-instant"
-EMBEDDING_MODEL = "gemini-embedding-001"
+
 QDRANT_COLLECTION_NAME = "studywise_documents"
 
 
@@ -345,6 +345,10 @@ class RagPipeline:
                         models.FieldCondition(
                             key="chapter_id",
                             match=models.MatchValue(value=str(chapter_id)),
+                        ),
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=str(user_id))
                         )
                     ]
                 ),
@@ -483,9 +487,25 @@ class RagPipeline:
             flat_results = await search_qdrant_vectors(
                 all_embeddings, 
                 filter=search_filter, 
-                limit_per_vector=8  # Get more results for reranking
+                limit_per_vector=15  # Get more results for reranking
             )
             logger.info(f"📦 Retrieved {len(flat_results)} results from Qdrant")
+
+            if not flat_results:
+                logger.error("❌ NO RESULTS!")
+                return "No relevant info in document."
+            
+            
+            query_words = set(query.lower().split())
+            KEYWORD_BOOST = 0.05
+
+            for r in flat_results:
+                if r.payload and "text" in r.payload:
+                    text_words = r.payload["text"].lower()
+                    keyword_hits = sum(1 for w in query_words if w in text_words)
+                    r.score += KEYWORD_BOOST * keyword_hits 
+
+            flat_results.sort(key=lambda x: x.score, reverse=True)
 
 
             if flat_results and len(flat_results) > 0:
