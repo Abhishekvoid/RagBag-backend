@@ -1,19 +1,30 @@
-
-__pycache__/
-*.py[cod]
-*.sqlite3
-.env
-
-
-venv/
-env/
-
-
-*.log
-media/
-staticfiles/
- # Python cache files
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Environment
+.env
+
+# Virtual env
+venv/
+env/
+
+# Database
+*.sqlite3
+
+# Logs
+*.log
+
+# Django
+media/
+staticfiles/
+
+# AI / vector indexes
+*.faiss
+*.index
+
+# OS
+.DS_Store
+Thumbs.db
