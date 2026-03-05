@@ -7,9 +7,9 @@ __pycache__/
 # Environment
 .env
 
-# Virtual env
+# Virtual environments
 venv/
-env/
+.venv/
 
 # Database
 *.sqlite3
@@ -17,13 +17,15 @@ env/
 # Logs
 *.log
 
-# Django
+# Huggingface / models
+hf_cache/
+
+# Uploaded RAG documents
+[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*/
+
+# Django generated
 media/
 staticfiles/
-
-# AI / vector indexes
-*.faiss
-*.index
 
 # OS
 .DS_Store
