@@ -129,22 +129,41 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 # ---------- Supabase Storage (S3-Compatible) FINAL -----------
-DEFAULT_FILE_STORAGE = 'storages.backends.s3_boto3.S3Boto3Storage'
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
-SUPABASE_PROJECT_ID = os.getenv('SUPABASE_PROJECT_ID')
-SUPABASE_BUCKET = os.getenv('SUPABASE_BUCKET')
+SUPABASE_PROJECT_ID = os.getenv("SUPABASE_PROJECT_ID")
 
-AWS_ACCESS_KEY_ID = os.getenv('SUPABASE_ACCESS_KEY')
-AWS_SECRET_ACCESS_KEY = os.getenv('SUPABASE_SECRET_KEY')
-AWS_STORAGE_BUCKET_NAME = SUPABASE_BUCKET
-AWS_S3_REGION_NAME = os.getenv('SUPABASE_REGION')
+AWS_ACCESS_KEY_ID = os.getenv("SUPABASE_ACCESS_KEY")
+AWS_SECRET_ACCESS_KEY = os.getenv("SUPABASE_SECRET_KEY")
 
-AWS_S3_ENDPOINT_URL = f"https://{SUPABASE_PROJECT_ID}.supabase.co/storage/v1"
-AWS_S3_CUSTOM_DOMAIN = f"{SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/{SUPABASE_BUCKET}"
-MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
+AWS_STORAGE_BUCKET_NAME = os.getenv("SUPABASE_BUCKET")
 
-AWS_S3_SIGNATURE_VERSION = 's3v4'
+AWS_S3_ENDPOINT_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/s3"
+
+AWS_S3_REGION_NAME = "ap-south-1"
+
+AWS_S3_SIGNATURE_VERSION = "s3v4"
 AWS_S3_FILE_OVERWRITE = False
+
+MEDIA_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/object/public/{AWS_STORAGE_BUCKET_NAME}/"
+# AWS_ACCESS_KEY_ID = os.getenv('SUPABASE_ACCESS_KEY')
+# AWS_SECRET_ACCESS_KEY = os.getenv('SUPABASE_SECRET_KEY')
+# AWS_STORAGE_BUCKET_NAME = SUPABASE_BUCKET
+# AWS_S3_REGION_NAME = os.getenv('SUPABASE_REGION')
+
+# AWS_S3_ENDPOINT_URL = f"https://{SUPABASE_PROJECT_ID}.supabase.co/storage/v1/s3"
+# AWS_S3_CUSTOM_DOMAIN = f"{SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/{SUPABASE_BUCKET}"
+# MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
+
+# AWS_S3_SIGNATURE_VERSION = 's3v4'
+# AWS_S3_FILE_OVERWRITE = False
 
 # ... (TEMPLATES, WSGI_APPLICATION, SECURITY SETTINGS are correct) ...
 
