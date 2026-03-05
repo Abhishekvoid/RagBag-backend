@@ -356,7 +356,7 @@ class RagPipeline:
             if vector_count == 0:
                 logger.warning(f"No vectors found for chapter {chapter_id}")
                 try:
-                    doc = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
+                    doc = await asyncio.to_thread(lambda: Document.objects.filter(chapter__id=chapter_id).first())
                     logger.info(f"document status: {doc.status}")
                     process_document_ingestion.delay(str(doc.id))
                     return "I'm preparing your document for chat. Please try again in a moment."
@@ -367,7 +367,7 @@ class RagPipeline:
             if e.status_code == 404:
                 logger.warning(f"Collection doesn't exist for chapter {chapter_id}")
                 try:
-                    doc = await asyncio.to_thread(Document.objects.get, chapter__id=chapter_id)
+                    doc = await asyncio.to_thread(lambda: Document.objects.filter(chapter__id=chapter_id).first())
                     process_document_ingestion.delay(str(doc.id))
                     return "Setting up your workspace. Please try again in a moment."
                 except Document.DoesNotExist:
@@ -476,14 +476,7 @@ class RagPipeline:
             user_id=str(user_id)
         )
 
-        logger.info(f"🔍 Searching Qdrant with filter: {search_filter}")
-        # Continue with normal search...
-        flat_results = await search_qdrant_vectors(
-            all_embeddings, 
-            filter=search_filter, 
-            limit_per_vector=8
-        )
-        
+       
         
         logger.info("🔍 Searching vector database...")
         try: 

@@ -414,7 +414,13 @@ class RAGChatMessageView(APIView):
 
         # --- CORRECTED: The Safety Gate is the primary control flow ---
         try:
-            document = Document.objects.get(chapter__id=chapter_id, user=user)
+            document = Document.objects.filter(chapter__id=chapter_id, user=user).order_by("-created_at").first()
+
+            if not document:
+                return self.response(
+                    {"error": "Document not found for this chapter."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
             if document.status != Document.STATUS_COMPLETED:
                 error_msg = f"This document is not ready for chat. Current status: {document.status}."
                 if document.status == Document.STATUS_FAILED:
@@ -433,10 +439,13 @@ class RAGChatMessageView(APIView):
             )
             ChatMessage.objects.create(session=session, sender='user', text=user_query)
 
+            history = ChatMessage.objects.filter(
+            session=session
+            ).order_by("created_at")[:10]
             # Call the high-performance RAG function
             ai_text_response = async_to_sync(rag_pipeline.run)(
                 user_query,
-                chat_history=[],          
+                chat_history=list(history),          
                 chapter_id=str(chapter_id),
                 user_id=user.id,
             )

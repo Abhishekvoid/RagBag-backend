@@ -1,47 +1,50 @@
 from .llm_wrapper import _call_llm_with_retry
-from .circuit_breaker import CircuitBreaker, llm_circuit_breaker
+from .circuit_breaker import llm_circuit_breaker, redis_client
 import logging
-from .llm_load_control import SlotManager, SystemOverload, llm_slot_manager
+from .llm_load_control import SystemOverload, llm_slot_manager
 
-logger =  logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
-llm_circuit_breaker = CircuitBreaker("llm")
 class LLMUnavailable(Exception):
     pass
 
 
-async def ask_llm(groq_client,messages,*,model,json_mode=False,**kwargs):
-
+async def ask_llm(groq_client, messages, *, model, json_mode=False, **kwargs):
 
     # circuit breaker gate
-
-    if not CircuitBreaker.is_open(self):
-        logging.warning("LLM circuit OPEN - blocking  request")
+    if llm_circuit_breaker.is_open():
+        logger.warning("LLM circuit OPEN - blocking request")
         raise LLMUnavailable("LLM temporarily unavailable")
 
- 
     try:
+        async with llm_slot_manager.slot():
 
-        async with llm_slot_manager():
+            response = await _call_llm_with_retry(
+                groq_client,
+                messages=messages,
+                model=model,
+                json_mode=json_mode,
+                **kwargs
+            )
 
-            response = await _call_llm_with_retry(groq_client,messages=messages,model=model,json_mode=json_mode,**kwargs)
-
-            # sucess -> reset breaker
-            CircuitBreaker.record_sucess()
+            # success → reset breaker
+            llm_circuit_breaker.record_success()
             return response
+
     except SystemOverload:
         raise LLMUnavailable("system under heavy load")
-    except Exception as e:
 
-        CircuitBreaker.record_failure()
+    except Exception:
+
+        llm_circuit_breaker.record_failure()
 
         logger.exception(
-            "LLM call is failed",
-                extra={
-                "circuit_state": CircuitBreaker.state,
-                "failures": CircuitBreaker.failures,
-
-                } 
+            "LLM call failed",
+            extra={
+                "circuit_state": redis_client.hget(llm_circuit_breaker.key, "state"),
+                "failures": redis_client.hget(llm_circuit_breaker.key, "failures"),
+            }
         )
+
         raise
