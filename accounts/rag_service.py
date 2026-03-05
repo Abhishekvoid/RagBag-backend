@@ -17,24 +17,38 @@ async def embed_texts(texts: Union[str, List[str]]) -> List[List[float]]:
     embeddings = await tei_client.embed_texts(texts)
     return embeddings
 
-async def search_qdrant_vectors(vectors: List[List[float]], filter: models.Filter, limit_per_vector:int=5):
-    """
-    Batch-search qdrant for each vector and return combined results.
-    """
-    requests = [models.SearchRequest(vector=v, filter=filter, limit=limit_per_vector) for v in vectors]
-    # async search_batch from async_qdrant_client
-    results = await async_qdrant_client.search_batch(collection_name="studywise_documents", requests=requests)
-    # flatten
-    flat = [item for sub in results for item in sub]
-    # dedupe by payload text
-    seen = set()
-    unique = []
-    for r in flat:
-        text = (r.payload or {}).get("text")
-        if text and text not in seen:
-            seen.add(text)
-            unique.append(r)
-    return unique
+async def search_qdrant_vectors(vectors: List[List[float]], filter: models.Filter | None, limit_per_vector:int=5):
+   
+    requests = [
+        models.SearchRequest(
+            vector=v,
+            filter=filter,
+            limit=limit_per_vector,
+            with_payload=True,
+            with_vector=False
+        )
+        for v in vectors
+    ]
+
+    results = await async_qdrant_client.search_batch(
+        collection_name="studywise_documents",
+        requests=requests
+    )
+
+    flat = []
+
+    for batch in results:
+        flat.extend(batch)
+
+    logger.info(f"search_batch returned {len(results)} batches")
+
+    for batch in results:
+        logger.info(f"batch size: {len(batch)}")
+
+    return flat
+    
+    
+    
 
 async def store_context_to_qdrant(payload: dict, vector: List[float], id: str = None):
     """

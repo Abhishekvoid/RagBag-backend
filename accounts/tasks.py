@@ -24,7 +24,7 @@ import uuid
 
 
 from utils.tei_embedding import TEIEmbeddingClient
-_tei_client = TEIEmbeddingClient()
+
 # ---------------------------------------------
 
 BATCH_SIZE = 100
@@ -330,7 +330,8 @@ def process_document_ingestion(self, document_id: str):
             raise ValueError("Text could not be split into chunks.")
             
         logger.info(f"[{document_id}] Generating embeddings for {len(text_chunks)} chunks via TEI...")
-        all_embeddings = async_to_sync(_tei_client.embed_texts)(text_chunks)
+        tei_client = TEIEmbeddingClient()
+        all_embeddings = async_to_sync(tei_client.embed_texts)(text_chunks)
         
 
         try:
