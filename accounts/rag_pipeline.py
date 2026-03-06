@@ -56,6 +56,15 @@ class RagPipeline:
         self.embedding_model = embedding_model
         self.LLM_model = LLM_MODEL
 
+
+    def is_greeting(self, user_query: str) -> bool:
+        greetings = {
+        "hi","hii","hello","hey","yo","sup",
+        "good morning","good afternoon","good evening"
+        }
+
+        return user_query.lower().strip() in greetings
+        
     async def run(self, user_query, chat_history, chapter_id, user_id):
         # step 1: contextualization
 
@@ -81,7 +90,7 @@ class RagPipeline:
             logger.info(f"Detected intent: {intent}")
 
             # step 3: Execute strategy
-            if intent == "greeting":
+            if self.is_greeting(user_query):
                 result =  await self.handle_greeting(user_query)
             elif intent == "summary":
                 result =  await self.handle_summary(chapter_id, user_id)
@@ -123,6 +132,7 @@ class RagPipeline:
                 }
             )
 
+    
     async def contextualize_query(self, query, history, request_id, user_id, chapter_id):
         """
         Turn last user question into a standalone question using chat history.
@@ -435,25 +445,25 @@ class RagPipeline:
                 limit_per_vector=5
             )
             
-            logger.info(f"🧪 Test search (no filter) returned {len(test_results)} results")
+            logger.info(f"Test search (no filter) returned {len(test_results)} results")
             
             if test_results and len(test_results) > 0:
-                logger.info("✅ Embeddings are working! Problem is with the filter.")
+                logger.info("Embeddings are working! Problem is with the filter.")
                 logger.info(f"Sample result chapter_id: {test_results[0].payload.get('chapter_id')}")
                 logger.info(f"Sample result user_id: {test_results[0].payload.get('user_id')}")
                 logger.info(f"Your filter chapter_id: {chapter_id}")
                 logger.info(f"Your filter user_id: {user_id}")
             else:
-                logger.error("❌ Even without filter, no results! Embedding model mismatch?")
+                logger.error("Even without filter, no results! Embedding model mismatch?")
                 
         except Exception as e:
             logger.error(f"Test search failed: {e}", exc_info=True)
 
         # Now do the normal filtered search
-        logger.info(f"🔍 Searching with filter: chapter_id={chapter_id}, user_id={user_id}")
+        logger.info(f"Searching with filter: chapter_id={chapter_id}, user_id={user_id}")
 
         # ===== Also check what's actually stored in Qdrant =====
-        logger.info("🔍 Checking what's in Qdrant for this chapter...")
+        logger.info("Checking what's in Qdrant for this chapter...")
 
         try:
             # Scroll through some vectors to see what chapter_ids exist
@@ -464,7 +474,7 @@ class RagPipeline:
                 with_vectors=False,
             )
             
-            logger.info(f"📦 Sample vectors in collection:")
+            logger.info(f" Sample vectors in collection:")
             for point in scroll_result[0]:
                 logger.info(f"  - ID: {point.id}")
                 logger.info(f"    chapter_id: {point.payload.get('chapter_id')}")
@@ -489,7 +499,7 @@ class RagPipeline:
                 filter=search_filter, 
                 limit_per_vector=15  # Get more results for reranking
             )
-            logger.info(f"📦 Retrieved {len(flat_results)} results from Qdrant")
+            logger.info(f" Retrieved {len(flat_results)} results from Qdrant")
 
             if not flat_results:
                 logger.error("❌ NO RESULTS!")
