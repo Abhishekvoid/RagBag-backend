@@ -15,10 +15,12 @@ from .views import (
     GenerateQuestionsView,
     GenerateFlashCardView,
     FlashCardDetailView,
+    MeView,
 )
 
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='custom-register'),
+    path('me/', MeView.as_view(), name="auth=me"),
     path('chatsessions/',ChatSessionView.as_view(), name='chatsessions-list-create' ),
     path('chatsessions/<uuid:id>/',ChatSessionRetriveView.as_view(), name='chatsession-detail'),
     path('chatmessage/', ChatMessageView.as_view(), name='chatmessage'),

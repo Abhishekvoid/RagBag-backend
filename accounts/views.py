@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer, GeneratedFlashCardsSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer,GeneratedFlashCardsSerializer, MeSerializer
 import logging, time
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
@@ -92,6 +92,12 @@ class RegisterAPIView(APIView):
                 'error': 'Internal server error'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = MeSerializer(request.user)
+        return Response(serializer.data)
 
 # ------------ subject --------------
 

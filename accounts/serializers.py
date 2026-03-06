@@ -30,7 +30,14 @@ class RegisterSerializers(BaseUserCreateSerializer):
         attrs.pop('password2')
         return super().validate(attrs)
 
-
+class MeSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    class Meta:
+        model = User
+        fields = ["email", "name"]
+    
+    def get_name(self, obj):
+        return obj.name
 
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
