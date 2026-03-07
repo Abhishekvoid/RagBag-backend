@@ -447,7 +447,7 @@ class RAGChatMessageView(APIView):
 
             history = ChatMessage.objects.filter(
             session=session
-            ).order_by("created_at")[:10]
+            )
             # Call the high-performance RAG function
             ai_text_response = async_to_sync(rag_pipeline.run)(
                 user_query,
