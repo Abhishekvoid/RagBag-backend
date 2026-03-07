@@ -18,12 +18,12 @@ import time
 import uuid
 
 from utils.llm_gateway import ask_llm, LLMUnavailable
-
 from .rag_service import (
     embed_texts,
     search_qdrant_vectors,
     make_chapter_user_filter,
 )
+from utils.reranking_crossencoder import reranker
 
 load_dotenv()
 
@@ -56,6 +56,7 @@ class RagPipeline:
         self.embedding_model = embedding_model
         self.LLM_model = LLM_MODEL
 
+        
 
     def is_greeting(self, user_query: str) -> bool:
         greetings = {
@@ -437,33 +438,33 @@ class RagPipeline:
         
         logger.info("🧪 Testing search WITHOUT filter to verify embeddings work...")
 
-        try:
-            # Search without any filter to see if we get ANY results
-            test_results = await search_qdrant_vectors(
-                [all_embeddings[0]],  # Just test with first embedding
-                filter=None,  # NO FILTER
-                limit_per_vector=5
-            )
+        # try:
+        #     # Search without any filter to see if we get ANY results
+        #     test_results = await search_qdrant_vectors(
+        #         [all_embeddings[0]],  # Just test with first embedding
+        #         filter=None,  # NO FILTER
+        #         limit_per_vector=5
+        #     )
             
-            logger.info(f"Test search (no filter) returned {len(test_results)} results")
+        #     logger.info(f"Test search (no filter) returned {len(test_results)} results")
             
-            if test_results and len(test_results) > 0:
-                logger.info("Embeddings are working! Problem is with the filter.")
-                logger.info(f"Sample result chapter_id: {test_results[0].payload.get('chapter_id')}")
-                logger.info(f"Sample result user_id: {test_results[0].payload.get('user_id')}")
-                logger.info(f"Your filter chapter_id: {chapter_id}")
-                logger.info(f"Your filter user_id: {user_id}")
-            else:
-                logger.error("Even without filter, no results! Embedding model mismatch?")
+        #     if test_results and len(test_results) > 0:
+        #         logger.info("Embeddings are working! Problem is with the filter.")
+        #         logger.info(f"Sample result chapter_id: {test_results[0].payload.get('chapter_id')}")
+        #         logger.info(f"Sample result user_id: {test_results[0].payload.get('user_id')}")
+        #         logger.info(f"Your filter chapter_id: {chapter_id}")
+        #         logger.info(f"Your filter user_id: {user_id}")
+        #     else:
+        #         logger.error("Even without filter, no results! Embedding model mismatch?")
                 
-        except Exception as e:
-            logger.error(f"Test search failed: {e}", exc_info=True)
+        # except Exception as e:
+        #     logger.error(f"Test search failed: {e}", exc_info=True)
 
-        # Now do the normal filtered search
-        logger.info(f"Searching with filter: chapter_id={chapter_id}, user_id={user_id}")
+        # # Now do the normal filtered search
+        # logger.info(f"Searching with filter: chapter_id={chapter_id}, user_id={user_id}")
 
-        # ===== Also check what's actually stored in Qdrant =====
-        logger.info("Checking what's in Qdrant for this chapter...")
+        # # ===== Also check what's actually stored in Qdrant =====
+        # logger.info("Checking what's in Qdrant for this chapter...")
 
         try:
             # Scroll through some vectors to see what chapter_ids exist
@@ -497,7 +498,7 @@ class RagPipeline:
             flat_results = await search_qdrant_vectors(
                 all_embeddings, 
                 filter=search_filter, 
-                limit_per_vector=15  # Get more results for reranking
+                limit_per_vector=8  # Get more results for reranking
             )
             logger.info(f" Retrieved {len(flat_results)} results from Qdrant")
 
@@ -534,69 +535,45 @@ class RagPipeline:
             return "Search failed. Please try again."
             
 
-    # ===== STEP 4: RERANKING =====
-        logger.info("📊 Reranking results by relevance...")
-        
-        # Deduplicate first
+        # reranking 
+
+        logger.info("Reranking results by relevance...")
+
+# deduplicate
         seen = set()
         unique_results = []
 
         for r in flat_results:
-            if r and r.payload and "text" in r.payload:
-                text = r.payload["text"]
-                if text not in seen:
-                    seen.add(text)
-                    unique_results.append(r)
+            text = r.payload.get("text") if r.payload else None
+            if text and text not in seen:
+                seen.add(text)
+                unique_results.append(r)
 
-        logger.info(f"✅ After deduplication: {len(unique_results)} unique chunks")
-    
-    # If we have enough results, rerank them
+        logger.info(f"Deduped: {len(unique_results)} chunks")
+
         if len(unique_results) > 5:
-            
-            chunks_preview = "\n\n".join([
-                f"[CHUNK {i}]\n{r.payload['text'][:400]}..."
-                for i, r in enumerate(unique_results[:12])
-            ])
-        
-            rerank_prompt = f"""Rate each chunk's relevance to this question (0-10 scale).
 
-                Question: {query}
+            RERANK_LIMIT = min(len(unique_results), 20)
+            pairs = [[query, r.payload["text"]] for r in unique_results[:RERANK_LIMIT]]
 
-                Chunks:
-                {chunks_preview}
+            scores = reranker.predict(pairs, batch_size=32,show_progress_bar=False)
 
-                Return JSON: {{"scores": [score1, score2, ...]}}
-                """
-                        
-            try:
-                rerank_response = await ask_llm(
-                    self.groq_client,
-                    messages=[{"role": "user", "content": rerank_prompt}],
-                    model=LLM_MODEL,
-                    json_mode=True,
-                    temperature=0.1,
-                )
-                
-                scores_data = json.loads(rerank_response.choices[0].message.content)
-                scores = scores_data.get("scores", [])
-                
-                # Combine results with scores
-                scored_results = [
-                    (unique_results[i], scores[i])
-                    for i in range(min(len(unique_results), len(scores)))
-                ]
-                
-                # Sort by reranked scores
-                scored_results.sort(key=lambda x: x[1], reverse=True)
-                
-                # Take top results with good scores
-                final_results = [r[0] for r in scored_results[:8] if r[1] >= 4]
-                
-                logger.info(f"✅ Reranked to {len(final_results)} high-quality chunks")
-                
-            except Exception as e:
-                logger.error(f"Reranking failed: {e}, using original ranking")
+            if not scores:
+                logger.warning("Reranker returned no scores")
                 final_results = unique_results[:8]
+
+            for i, r in enumerate(unique_results[:RERANK_LIMIT]):
+                r.score = float(scores[i])
+
+            final_results = sorted(unique_results, key=lambda x: x.score, reverse=True)[:8]
+
+            if final_results:
+                logger.info(
+                    f"Reranked {len(final_results)} chunks. Top score={final_results[0].score:.3f}"
+                )
+            else:
+                logger.warning("Reranker returned 0 results")
+
         else:
             final_results = unique_results[:8]
 
@@ -654,14 +631,7 @@ class RagPipeline:
 
             **YOUR RESPONSE:**
             """
-        count = await async_qdrant_client.count(
-            collection_name="studywise_documents",
-            exact=True
-        )
-        print(count)
-
-        info = await async_qdrant_client.get_collection("studywise_documents")
-        print(info.config.params.vectors.size)
+       
         try:
             chat_completion = await ask_llm(
                 self.groq_client,
