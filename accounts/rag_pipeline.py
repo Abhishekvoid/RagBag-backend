@@ -24,6 +24,9 @@ from .rag_service import (
     make_chapter_user_filter,
 )
 from utils.reranking_crossencoder import reranker
+from utils.metrics.latency import latency_tracker
+from utils.metrics.retrieval import retrieval_evaluator
+from utils.metrics.cost import cost_tracker
 
 load_dotenv()
 
@@ -407,15 +410,16 @@ class RagPipeline:
     """
     
         try:
-            expansion_response = await ask_llm(
-                self.groq_client,
-                messages=[{"role": "user", "content": expansion_prompt}],
-                model=LLM_MODEL,
-                json_mode = True,
-                temperature=0.2,
-            )
-            expansion_data = json.loads(expansion_response.choices[0].message.content)
-            expanded_queries = expansion_data.get("queries", [query])
+            async with latency_tracker.track_async("query_expansion"):
+                expansion_response = await ask_llm(
+                    self.groq_client,
+                    messages=[{"role": "user", "content": expansion_prompt}],
+                    model=LLM_MODEL,
+                    json_mode = True,
+                    temperature=0.2,
+                )
+                expansion_data = json.loads(expansion_response.choices[0].message.content)
+                expanded_queries = expansion_data.get("queries", [query])
 
         except LLMUnavailable:
             logger.info(f"Query Expansion failed -> llm unavialable")
@@ -430,8 +434,9 @@ class RagPipeline:
     # ===== STEP 3: EMBED & SEARCH =====
         logger.info("🔢 Embedding queries...")
         try:
-            all_embeddings = await embed_texts(all_queries)
-            logger.info(f"✅ Generated {len(all_embeddings)} embeddings")
+            async with latency_tracker.track_async("embeddings"):
+                all_embeddings = await embed_texts(all_queries)
+                logger.info(f"✅ Generated {len(all_embeddings)} embeddings")
         except Exception as e:
             logger.error(f"❌ Embedding failed: {e}")
             return "Failed to process your question. Please try again."
@@ -495,12 +500,13 @@ class RagPipeline:
         
         logger.info("🔍 Searching vector database...")
         try: 
-            flat_results = await search_qdrant_vectors(
-                all_embeddings, 
-                filter=search_filter, 
-                limit_per_vector=8  # Get more results for reranking
-            )
-            logger.info(f" Retrieved {len(flat_results)} results from Qdrant")
+            async with latency_tracker.track_async("vector_serach"):
+                flat_results = await search_qdrant_vectors(
+                    all_embeddings, 
+                    filter=search_filter, 
+                    limit_per_vector=15  # Get more results for reranking
+                )
+                logger.info(f" Retrieved {len(flat_results)} results from Qdrant")
 
             if not flat_results:
                 logger.error("❌ NO RESULTS!")
@@ -555,8 +561,9 @@ class RagPipeline:
 
             RERANK_LIMIT = min(len(unique_results), 20)
             pairs = [[query, r.payload["text"]] for r in unique_results[:RERANK_LIMIT]]
-
-            scores = reranker.predict(pairs, batch_size=32,show_progress_bar=False)
+            
+            async with latency_tracker.track_async("reranking"):
+                scores = reranker.predict(pairs, batch_size=32,show_progress_bar=False)
 
             if not scores:
                 logger.warning("Reranker returned no scores")
@@ -577,6 +584,10 @@ class RagPipeline:
         else:
             final_results = unique_results[:8]
 
+        retrieval_evaluator.evaluate(
+            query=query,
+            chunks=[r.payload['text'] for r in final_results]
+        )
     # ===== STEP 5: BUILD CONTEXT =====
         context = "\n\n---\n\n".join([
             r.payload["text"] for r in final_results
@@ -633,14 +644,15 @@ class RagPipeline:
             """
        
         try:
-            chat_completion = await ask_llm(
-                self.groq_client,
-                messages=[{"role": "user", "content": final_prompt}],
-                model=LLM_MODEL,
-                temperature=0.1,  # Very low temperature for factual accuracy
-                max_tokens=800,
-                timeout=30.0,
-            )
+            async with latency_tracker.track_async("llm_generation"):
+                chat_completion = await ask_llm(
+                    self.groq_client,
+                    messages=[{"role": "user", "content": final_prompt}],
+                    model=LLM_MODEL,
+                    temperature=0.1,  # Very low temperature for factual accuracy
+                    max_tokens=800,
+                    timeout=30.0,
+                )
 
             raw_output = chat_completion.choices[0].message.content
             logger.info(f"✅ Generated response ({len(raw_output)} chars)")

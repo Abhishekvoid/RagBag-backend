@@ -153,19 +153,6 @@ AWS_S3_SIGNATURE_VERSION = "s3v4"
 AWS_S3_FILE_OVERWRITE = False
 
 MEDIA_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/object/public/{AWS_STORAGE_BUCKET_NAME}/"
-# AWS_ACCESS_KEY_ID = os.getenv('SUPABASE_ACCESS_KEY')
-# AWS_SECRET_ACCESS_KEY = os.getenv('SUPABASE_SECRET_KEY')
-# AWS_STORAGE_BUCKET_NAME = SUPABASE_BUCKET
-# AWS_S3_REGION_NAME = os.getenv('SUPABASE_REGION')
-
-# AWS_S3_ENDPOINT_URL = f"https://{SUPABASE_PROJECT_ID}.supabase.co/storage/v1/s3"
-# AWS_S3_CUSTOM_DOMAIN = f"{SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/{SUPABASE_BUCKET}"
-# MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
-
-# AWS_S3_SIGNATURE_VERSION = 's3v4'
-# AWS_S3_FILE_OVERWRITE = False
-
-# ... (TEMPLATES, WSGI_APPLICATION, SECURITY SETTINGS are correct) ...
 
 # Database
 DATABASES = {
@@ -209,6 +196,10 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
         },
+    },
+    "root": {                     
+        "handlers": ["console"],
+        "level": "INFO",
     },
     "loggers": {
         "django": {
