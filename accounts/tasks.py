@@ -227,10 +227,21 @@ def create_chapter_from_document(self, document_id: str):
         _, _, groq_client = _get_clients()
         
 
-        logger.info(f"[{document_id}] Extracting text from file: {doc.file.name}")
-        document_text = get_text_from_file(doc.file.name, doc.file_type)
-        if not document_text:
-            raise ValueError("No text could be extracted from the document.")
+        
+        if not doc.extracted_text:
+            logger.info(f"[{document_id}] Extracting text from file: {doc.file.name}")
+            document_text = get_text_from_file(doc.file.name, doc.file_type)
+
+            if not document_text:
+                raise ValueError("No text could be extracted from the document.")
+            
+            doc.extracted_text = document_text
+            doc.save(update_fields=["extracted_text"])
+        else:
+            logger.info(f"[{document_id}] Using cached extracted text")
+            document_text = doc.extracted_text
+
+       
         logger.info(f"[{document_id}] Text extracted successfully. Length: {len(document_text)} characters.")
 
         prompt = f"Based on the following text, create a short, descriptive title (4-5 words max) for a new chapter. Do not use quotes.\n\nTEXT:\n{document_text[:4000]}\n\nTITLE:"
@@ -311,7 +322,9 @@ def process_document_for_existing_chapter(document_id, chapter_id):
 # ----- CORRECTED DOCUMENT PROCESSING TASK --------
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def process_document_ingestion(self, document_id: str):
-    logger.info(f"[{document_id}] Starting document ingestion for RAG...")
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Starting document ingestion for RAG...")
+    
     doc = Document.objects.get(id=document_id)
     
     try:
@@ -325,55 +338,81 @@ def process_document_ingestion(self, document_id: str):
         if not doc.extracted_text.strip():
             raise ValueError("No text available for ingestion.")
 
+        
+        tei_client = TEIEmbeddingClient()
         text_chunks = chunk_text_by_token(doc.extracted_text, tokenizer)
+        text_chunks = text_chunks[:MAX_CHUNKS_PER_DOCUMENT]
+
+        logger.info(f"[{document_id}] Generated {len(text_chunks)} chunks")
+
         if not text_chunks:
             raise ValueError("Text could not be split into chunks.")
-            
-        logger.info(f"[{document_id}] Generating embeddings for {len(text_chunks)} chunks via TEI...")
-        tei_client = TEIEmbeddingClient()
-        all_embeddings = async_to_sync(tei_client.embed_texts)(text_chunks)
-        
+
+        BATCH = 16
+
+        MIN_CHUNK_LEN = 10
+        MAX_CHUNK_LEN = 800
 
         try:
             qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
         except Exception:
             qdrant_client.recreate_collection(
-                collection_name=QDRANT_COLLECTION_NAME,
-                vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE)
-            )
-
-        points_batch = []
-        for chunk, vector in zip(text_chunks, all_embeddings):
-            payload = {
-                "text": chunk,
-                "document_id": str(document_id),
-                "file_type": doc.file_type,
-                "user_id": str(doc.user.id)
-            }
-            if doc.chapter:
-                payload["chapter_id"] = str(doc.chapter.id)
-            
-            point = PointStruct(
-                id=str(uuid.uuid4()),
-                vector=vector,
-                payload=payload
-            )
-            points_batch.append(point)
-            
-            if len(points_batch) >= BATCH_SIZE:
-                qdrant_client.upsert(
-                    collection_name=QDRANT_COLLECTION_NAME,
-                    points=points_batch,
-                    wait=True
-                )
-                points_batch = []
+            collection_name=QDRANT_COLLECTION_NAME,
+            vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE)
+        )
         
-        if points_batch:
+        all_inserted = 0
+        for i in range(0, len(text_chunks), BATCH):
+            
+            chunk_batch = text_chunks[i:i + BATCH]
+            chunk_batch = [c.strip() for c in chunk_batch if len(c.strip()) > MIN_CHUNK_LEN]
+
+            if not chunk_batch:
+                logger.warning(f"[{correlation_id}] Empty batch at index {i}")
+                continue
+                
+            # Truncate oversized chunks
+            chunk_batch = [c[:MAX_CHUNK_LEN] for c in chunk_batch]
+            
+            logger.info(f"[{correlation_id}] Embedding batch {i//BATCH_SIZE + 1}/{(len(text_chunks)-1)//BATCH_SIZE + 1} ({len(chunk_batch)} chunks)")
+
+            
+            try:
+                embeddings = async_to_sync(tei_client.embed_texts)(chunk_batch)
+            except Exception as e:
+                logger.error(f"Embedding batch failed: {e}")
+                continue
+            points = []
+
+            logger.info(f"Embedding batch {i//BATCH + 1} ({len(chunk_batch)} chunks)")
+            for chunk, vector in zip(chunk_batch, embeddings):
+                
+
+                
+                payload = {
+                    "text": chunk,
+                    "document_id": str(document_id),
+                    "user_id": str(doc.user.id),
+                    "file_type": doc.file_type,
+                }
+
+                if doc.chapter:
+                    payload["chapter_id"] = str(doc.chapter.id)
+
+                points.append(
+                    PointStruct(
+                        id=str(uuid.uuid4()),
+                        vector=vector,
+                        payload=payload
+                    )
+                )
             qdrant_client.upsert(
                 collection_name=QDRANT_COLLECTION_NAME,
-                points=points_batch,
+                points=points,
                 wait=True
             )
+            
+        
             
         # --- NEW: On success, mark as COMPLETED ---
         doc.status = Document.STATUS_COMPLETED

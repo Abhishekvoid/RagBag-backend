@@ -5,6 +5,7 @@ import asyncio
 import logging
 from django.conf import settings
 from dotenv import load_dotenv
+import numpy as np 
 
 from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
@@ -548,7 +549,6 @@ class RagPipeline:
 # deduplicate
         seen = set()
         unique_results = []
-
         for r in flat_results:
             text = r.payload.get("text") if r.payload else None
             if text and text not in seen:
@@ -558,29 +558,26 @@ class RagPipeline:
         logger.info(f"Deduped: {len(unique_results)} chunks")
 
         if len(unique_results) > 5:
-
             RERANK_LIMIT = min(len(unique_results), 20)
             pairs = [[query, r.payload["text"]] for r in unique_results[:RERANK_LIMIT]]
             
             async with latency_tracker.track_async("reranking"):
-                scores = reranker.predict(pairs, batch_size=32,show_progress_bar=False)
-
-            if not scores:
+                scores = reranker.predict(pairs, batch_size=32, show_progress_bar=False)
+            
+            # ✅ FIXED: Safe numpy check + proper score assignment
+            if len(scores) == 0:
                 logger.warning("Reranker returned no scores")
                 final_results = unique_results[:8]
-
-            for i, r in enumerate(unique_results[:RERANK_LIMIT]):
-                r.score = float(scores[i])
-
-            final_results = sorted(unique_results, key=lambda x: x.score, reverse=True)[:8]
-
-            if final_results:
-                logger.info(
-                    f"Reranked {len(final_results)} chunks. Top score={final_results[0].score:.3f}"
-                )
             else:
-                logger.warning("Reranker returned 0 results")
-
+                # Apply scores ONLY to reranked items
+                for i, r in enumerate(unique_results[:RERANK_LIMIT]):
+                    r.score = float(scores[i])
+                
+                # ✅ FIXED: Sort ONLY scored items
+                scored_results = unique_results[:RERANK_LIMIT]
+                final_results = sorted(scored_results, key=lambda x: x.score, reverse=True)[:8]
+                
+                logger.info(f"Reranked {len(final_results)} chunks. Top score={final_results[0].score:.3f}")
         else:
             final_results = unique_results[:8]
 
