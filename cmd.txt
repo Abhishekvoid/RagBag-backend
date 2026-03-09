@@ -1,5 +1,5 @@
 
-celery -A core worker -l info -P gevent
+celery -A core worker -l info -P solo
 
 python manage.py shell
 

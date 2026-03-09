@@ -605,6 +605,14 @@ class RagPipeline:
         
         final_prompt = f"""You are an expert AI tutor helping a student understand their study material. Provide a clear, accurate, and helpful response.
 
+            **MANDATORY FORMATTING RULES (Follow exactly):**
+            1. **Always** start with a 1-sentence direct answer in bold.
+            2. Use **one blank line** between every paragraph/section.
+            3. Every paragraph = MAX 2 sentences (40 words).
+            4. Use `-` bullets for ANY list (steps, factors, examples).
+            5. **Bold key terms** on first mention only.
+            6. End technical explanations with `**In simple terms:** ...`
+
             **YOUR APPROACH:**
             1. Answer the question directly and concisely
             2. Ground every claim in the context provided below

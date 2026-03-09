@@ -278,7 +278,7 @@ class ChapterMessageListView(generics.ListAPIView):
         return ChatMessage.objects.filter(
             session__chapter_id=chapter_id,
             session__user=self.request.user
-        ).order_by('created_at')
+        ).order_by('-created_at')
     
 
 
@@ -447,7 +447,8 @@ class RAGChatMessageView(APIView):
 
             history = ChatMessage.objects.filter(
             session=session
-            )
+            ).order_by("-created_at")[:10]
+            history = list(reversed(history))
             # Call the high-performance RAG function
             ai_text_response = async_to_sync(rag_pipeline.run)(
                 user_query,
@@ -655,3 +656,14 @@ class FlashCardDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
 
         return GenerateFlashCards.objects.filter(user=self.request.user)
+
+# class FlashCardListView(generics.ListAPIView):
+#     permission_classes = [IsAuthenticated]
+#     serializer_class = GeneratedFlashCardsSerializer
+    
+#     def get_queryset(self):
+#         chapter_id = self.kwargs['chapter_id']
+#         return GenerateFlashCards.objects.filter(
+#             session__chapter_id = chapter_id,
+#             session__user=self.request.user
+#         ).order_by('created_at')
