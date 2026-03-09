@@ -177,3 +177,4 @@ class GeneratedFlashCardsSerializer(serializers.ModelSerializer):
     class Meta:
         model = GenerateFlashCards
         fields = ['id', 'chapter', 'flashcard_front', 'flashcard_back', 'known', 'need_review', 'created_at']
+        
