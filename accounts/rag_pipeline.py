@@ -562,7 +562,10 @@ class RagPipeline:
             pairs = [[query, r.payload["text"]] for r in unique_results[:RERANK_LIMIT]]
             
             async with latency_tracker.track_async("reranking"):
-                scores = reranker.predict(pairs, batch_size=32, show_progress_bar=False)
+                if reranker:
+                    scores = reranker.predict(pairs, batch_size=32, show_progress_bar=False)
+                else:
+                    scores = [0] *len(pairs)
             
             # ✅ FIXED: Safe numpy check + proper score assignment
             if len(scores) == 0:
