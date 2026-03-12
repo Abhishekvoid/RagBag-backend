@@ -13,9 +13,10 @@ ASGI_APPLICATION = "core.asgi.application"
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.environ.get("SECRET_KEY")
+
 if not SECRET_KEY:
-    raise ValueError("SECRET_KEY must be set in .env file")
+    raise ValueError("SECRET_KEY environment variable is required")
 
 
 ALLOWED_HOSTS = [
