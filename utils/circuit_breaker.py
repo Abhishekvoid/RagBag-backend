@@ -6,8 +6,6 @@ redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 class CircuitBreaker:
 
-    
-
     def __init__(self, service_name:str, failure_threshold =3, cooldown=60):
        
         
