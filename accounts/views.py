@@ -35,6 +35,7 @@ rag_pipeline = RagPipeline(
 )
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = "studywise_documents"
 
 LLM_MODEL = "llama-3.1-8b-instant"

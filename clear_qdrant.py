@@ -1,10 +1,15 @@
+import os
 from qdrant_client import QdrantClient
 
 # Make sure this matches your Qdrant URL and collection name
-QDRANT_URL = "http://localhost:6333"
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = "studywise_documents"
 
-client = QdrantClient(QDRANT_URL)
+client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY
+)
 
 print(f"Attempting to delete Qdrant collection: '{QDRANT_COLLECTION_NAME}'...")
 
