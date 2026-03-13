@@ -21,7 +21,7 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = os.getenv(
     "DJANGO_ALLOWED_HOSTS",
-    "127.0.0.1,localhost,ragbag-backend-production.up.railway.app"
+    "127.0.0.1,localhost,ragbag-backend-production.up.railway.app,rag-bag-frontend-51q9neh92-abhishek-s-projects-060411c6.vercel.app"
 ).split(",")
 
 # Application definition
