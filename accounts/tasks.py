@@ -11,7 +11,7 @@ import PyPDF2
 import docx
 from pptx import Presentation
 from dotenv import load_dotenv
-from qdrant_client.models import PointStruct
+from qdrant_client.models import PointStruct,  VectorParams, Distance
 from groq import Groq
 from .models import Document, Chapter
 
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 QDRANT_URL = getattr(settings, "QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 LLM_MODEL = "llama-3.1-8b-instant" 
 QDRANT_COLLECTION_NAME = "studywise_documents"
@@ -45,7 +46,7 @@ _groq_client = None
 def _get_clients():
     global _qdrant_client, _tokenizer, _groq_client
     if _qdrant_client is None:
-        _qdrant_client = QdrantClient(QDRANT_URL)
+        _qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     if _tokenizer is None:
         _tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
     if _groq_client is None:
