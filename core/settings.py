@@ -19,11 +19,10 @@ if not SECRET_KEY:
     raise ValueError("SECRET_KEY environment variable is required")
 
 
-ALLOWED_HOSTS = [
-    host.strip() 
-    for host in os.getenv('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost').split(',') 
-    if host.strip()
-]
+ALLOWED_HOSTS = os.getenv(
+    "DJANGO_ALLOWED_HOSTS",
+    "127.0.0.1,localhost,ragbag-backend-production.up.railway.app"
+).split(",")
 
 # Application definition
 INSTALLED_APPS = [
@@ -56,9 +55,9 @@ INSTALLED_APPS = [
 
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'allauth.account.middleware.AccountMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -81,10 +80,12 @@ CHANNEL_LAYERS = {
 
 
 CORS_ALLOWED_ORIGINS = [
-    origin.strip() 
-    for origin in os.getenv('CORS_ALLOWED_ORIGINS', '' ).split(',')
-    if origin.strip()
+    "http://localhost:3000",
+    "https://rag-bag-frontend.vercel.app",
+    "https://rag-bag-frontend-gy10fd87x-abhishek-s-projects-060411c6.vercel.app",
 ]
+
+CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # ... (REST_FRAMEWORK, CHANNEL_LAYERS, SIMPLE_JWT, etc. are all correct)
