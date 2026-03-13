@@ -28,7 +28,7 @@ ALLOWED_HOSTS = os.getenv(
 INSTALLED_APPS = [
 
       
-
+    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'rest_framework_simplejwt',
-    'corsheaders',
+    
     'djoser',
     'storages', 
     'channels',
@@ -85,9 +85,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://rag-bag-frontend.vercel.app",
     "https://rag-bag-frontend-gy10fd87x-abhishek-s-projects-060411c6.vercel.app",
+    "https://rag-bag-frontend-51q9neh92-abhishek-s-projects-060411c6.vercel.app",
 ]
 
-CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOW_CREDENTIALS = True
 
 # ... (REST_FRAMEWORK, CHANNEL_LAYERS, SIMPLE_JWT, etc. are all correct)
