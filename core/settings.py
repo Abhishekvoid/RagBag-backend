@@ -165,6 +165,12 @@ AWS_QUERYSTRING_AUTH = False
 
 MEDIA_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/object/public/{AWS_STORAGE_BUCKET_NAME}/"
 
+
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+if not DEBUG and (not QDRANT_URL or not QDRANT_API_KEY):
+    raise ValueError("QDRANT_URL and QDRANT_API_KEY required in production")
 # Database
 DATABASES = {
     'default': {
