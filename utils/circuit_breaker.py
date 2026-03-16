@@ -1,8 +1,11 @@
-
+import os
 import redis
 import time
 
-redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+redis_client = redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True
+)
 
 class CircuitBreaker:
 
