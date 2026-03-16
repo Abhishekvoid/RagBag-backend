@@ -1,7 +1,8 @@
-broker_url = 'redis://localhost:6379/0'
+import os
 
-# Set the result backend to use Redis.
-result_backend = 'redis://localhost:6379/0'
+broker_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+result_backend = broker_url
+
 
 # Standard Celery settings.
 task_serializer = 'json'
