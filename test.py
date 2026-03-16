@@ -1,10 +1,12 @@
-from qdrant_client import QdrantClient
+import os
+import django
+from io import BytesIO
 
-client = QdrantClient(
-    url="https://34dd525e-ad21-460f-8409-18af905d9875.europe-west3-0.gcp.cloud.qdrant.io:6333",
-    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.jJSWB-0-riiK_Pz0pdGisjHN1mgypC_vQe3BBKUrk2M"
-)
+# Configure Django settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')  # Your project name
+django.setup()
 
-# List collections
-collections = client.get_collections()
-print(collections)
+from storages.backends.s3boto3 import S3Boto3Storage
+storage = S3Boto3Storage()
+print(storage.bucket_name)  # 'media'
+print(storage.connection.meta.client.meta.endpoint_url) 
