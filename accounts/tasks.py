@@ -356,11 +356,32 @@ def process_document_ingestion(self, document_id: str):
 
         try:
             qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
+
         except Exception:
+            logger.info("Collection not found. Creating collection and indexes...")
+
             qdrant_client.recreate_collection(
-            collection_name=QDRANT_COLLECTION_NAME,
-            vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE)
-        )
+                collection_name=QDRANT_COLLECTION_NAME,
+                vectors_config=models.VectorParams(
+                    size=768,
+                    distance=models.Distance.COSINE
+                )
+            )
+
+            
+            qdrant_client.create_payload_index(
+                collection_name=QDRANT_COLLECTION_NAME,
+                field_name="chapter_id",
+                field_schema=models.PayloadSchemaType.KEYWORD
+            )
+
+            qdrant_client.create_payload_index(
+                collection_name=QDRANT_COLLECTION_NAME,
+                field_name="user_id",
+                field_schema=models.PayloadSchemaType.KEYWORD
+            )
+
+            logger.info("Qdrant collection and payload indexes created.")
         
         all_inserted = 0
         for i in range(0, len(text_chunks), BATCH):
