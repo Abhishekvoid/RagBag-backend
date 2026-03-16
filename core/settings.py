@@ -155,7 +155,9 @@ AWS_S3_ENDPOINT_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storag
 AWS_S3_REGION_NAME = "ap-south-1"
 
 AWS_S3_SIGNATURE_VERSION = "s3v4"
-AWS_S3_FILE_OVERWRITE = False
+
+AWS_S3_FILE_OVERWRITE = True    
+AWS_QUERYSTRING_AUTH = False 
 
 MEDIA_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/object/public/{AWS_STORAGE_BUCKET_NAME}/"
 
