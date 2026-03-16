@@ -19,7 +19,7 @@ def _clean_env(name: str):
 
 
 GROQ_API_KEY = _clean_env("GROQ_API_KEY")
-QDRANT_URL = _clean_env("QDRANT_URL") or "http://localhost:6333"
+QDRANT_URL = _clean_env("QDRANT_URL")   # or  "http://localhost:6333"
 
 QDRANT_API_KEY = _clean_env("QDRANT_API_KEY")
 

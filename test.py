@@ -1,12 +1,17 @@
 import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 import django
-from io import BytesIO
-
-# Configure Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')  # Your project name
 django.setup()
 
-from storages.backends.s3boto3 import S3Boto3Storage
-storage = S3Boto3Storage()
-print(storage.bucket_name)  # 'media'
-print(storage.connection.meta.client.meta.endpoint_url) 
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    url=os.getenv("QDRANT_URL"),
+    api_key=os.getenv("QDRANT_API_KEY")
+)
+
+# Correct way to check collections
+collections = client.get_collections()
+print("✅ Qdrant connected!")
+print("Collections count:", len(collections.collections))  # ← .collections
+print("Collections:", [c.name for c in collections.collections])

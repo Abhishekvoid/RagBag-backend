@@ -34,7 +34,7 @@ rag_pipeline = RagPipeline(
     embedding_model="gemini-embedding-001",
 )
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_URL = os.getenv("QDRANT_URL") #  "http://localhost:6333"
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = "studywise_documents"
 
