@@ -152,7 +152,7 @@ AWS_STORAGE_BUCKET_NAME = os.getenv("SUPABASE_BUCKET")
 
 AWS_S3_ENDPOINT_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/s3"
 
-AWS_S3_REGION_NAME = "ap-south-1"
+AWS_S3_REGION_NAME = "auto"
 
 AWS_S3_SIGNATURE_VERSION = "s3v4"
 
