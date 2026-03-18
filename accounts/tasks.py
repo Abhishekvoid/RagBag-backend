@@ -364,7 +364,7 @@ def process_document_ingestion(self, document_id: str):
             qdrant_client.create_collection(
                 collection_name=QDRANT_COLLECTION_NAME,
                 vectors_config=models.VectorParams(
-                    size=768,
+                    size=384,
                     distance=models.Distance.COSINE
                 )
             )
