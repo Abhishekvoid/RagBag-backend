@@ -356,11 +356,12 @@ def process_document_ingestion(self, document_id: str):
 
         try:
             qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
+            logger.info("Collection exists")
 
         except Exception:
-            logger.info("Collection not found. Creating collection and indexes...")
+            logger.info("Collection not found. Creating collection...")
 
-            qdrant_client.recreate_collection(
+            qdrant_client.create_collection(
                 collection_name=QDRANT_COLLECTION_NAME,
                 vectors_config=models.VectorParams(
                     size=768,
@@ -368,7 +369,8 @@ def process_document_ingestion(self, document_id: str):
                 )
             )
 
-            
+        # ✅ ALWAYS CREATE INDEX (CRITICAL FIX)
+        try:
             qdrant_client.create_payload_index(
                 collection_name=QDRANT_COLLECTION_NAME,
                 field_name="chapter_id",
@@ -381,7 +383,10 @@ def process_document_ingestion(self, document_id: str):
                 field_schema=models.PayloadSchemaType.KEYWORD
             )
 
-            logger.info("Qdrant collection and payload indexes created.")
+            logger.info("Indexes ensured for chapter_id and user_id")
+
+        except Exception as e:
+            logger.warning(f"Index creation skipped (likely exists): {e}")
         
         all_inserted = 0
         for i in range(0, len(text_chunks), BATCH):
