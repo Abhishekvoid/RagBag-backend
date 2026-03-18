@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 TEI_URL = os.getenv("TEI_URL", "http://localhost:8080/embed")
 TEI_TIMEOUT = float(os.getenv("TEI_TIMEOUT", 10.0))
-EXPECTED_DIM = int(os.getenv("EMBEDDING_DIM", 768))
+EXPECTED_DIM = int(os.getenv("EMBEDDING_DIM", 384))
 
 TEI_ERRORS = (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError)
 
