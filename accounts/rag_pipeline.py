@@ -374,13 +374,17 @@ class RagPipeline:
             logger.info(f"found {vector_count} vector for this chapter")
             if vector_count == 0:
                 logger.warning(f"No vectors found for chapter {chapter_id}")
-                try:
-                    doc = await asyncio.to_thread(lambda: Document.objects.filter(chapter__id=chapter_id).first())
-                    logger.info(f"document status: {doc.status}")
-                    process_document_ingestion.delay(str(doc.id))
-                    return "I'm preparing your document for chat. Please try again in a moment."
-                except Document.DoesNotExist:
-                    return "Document not found. Please re-upload it."
+                
+                doc = await asyncio.to_thread(
+                    lambda: Document.objects.filter(chapter__id = chapter_id).first()
+                )
+
+                if not doc:
+                    return "document not found. please re-upload it."
+                
+                logger.info(f"document status: {doc.status}")
+
+                return "I'm preparing your document for chat. Please wait a few seconds."
                     
         except UnexpectedResponse as e:
             if e.status_code == 404:
