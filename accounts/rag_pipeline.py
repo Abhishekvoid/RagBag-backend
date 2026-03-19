@@ -445,11 +445,10 @@ class RagPipeline:
             
             logger.info(f" Sample vectors in collection:")
             for point in scroll_result[0]:
-                logger.info(f"  - ID: {point.id}")
-                logger.info(f"    chapter_id: {point.payload.get('chapter_id')}")
-                logger.info(f"    user_id: {point.payload.get('user_id')}")
-                logger.info(f"    text preview: {point.payload.get('text', '')[:100]}")
-                
+                logger.info(f"Stored → chapter_id={point.payload.get('chapter_id')}, user_id={point.payload.get('user_id')}")
+                logger.info(f"Text preview: {point.payload.get('text', '')[:100]}")
+            
+            logger.info(f"FILTER DEBUG → user_id={user_id}, chapter_id={chapter_id}")
         except Exception as e:
             logger.error(f"Scroll check failed: {e}")
 
