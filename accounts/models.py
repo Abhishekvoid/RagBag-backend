@@ -62,7 +62,7 @@ class Chapter(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(CustomUserModel, on_delete=models.CASCADE, related_name='chapters')
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters', null=True, blank=True)
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=255)
     order = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
