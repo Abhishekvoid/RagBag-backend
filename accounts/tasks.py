@@ -301,14 +301,18 @@ def process_document_for_existing_chapter(document_id, chapter_id):
         chapter = Chapter.objects.get(id=chapter_id)
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Document and Chapter found.")
 
+
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Extracting text from file: {document.file.name}")
         extracted_text = extract_text_from_file(document.file)
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Text extracted. Length: {len(extracted_text)} characters.")
 
         document.extracted_text = extracted_text
-        document.status = Document.STATUS_COMPLETED
+        document.status = Document.STATUS_PROCESSING
         document.save(update_fields=['extracted_text', 'status'])
+
+        logger.info("Text extracted, triggering ingestion...")
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Document updated with extracted text and status COMPLETED.")
+        process_document_ingestion.delay(str(document.id))
 
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] TASK FINISHED: process_document_for_existing_chapter")
 
@@ -317,9 +321,11 @@ def process_document_for_existing_chapter(document_id, chapter_id):
     except Chapter.DoesNotExist:
         logger.error(f"process_document_for_existing_chapter: Chapter {chapter_id} not found.")
     except Exception as e:
-        logger.error(f"Error processing document {document_id} for existing chapter {chapter_id}: {e}", exc_info=True)
-        # Mark document as failed if processing fails
-        Document.objects.filter(id=document_id).update(status=Document.STATUS_FAILED, error_message=str(e))
+        logger.error(f"Error: {e}", exc_info=True)
+        Document.objects.filter(id=document_id).update(
+            status=Document.STATUS_FAILED,
+            error_message=str(e)
+        )
 # ----- CORRECTED DOCUMENT PROCESSING TASK --------
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def process_document_ingestion(self, document_id: str):
