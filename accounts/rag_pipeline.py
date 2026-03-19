@@ -6,6 +6,7 @@ import logging
 from django.conf import settings
 from dotenv import load_dotenv
 import numpy as np 
+from django.db import transaction
 
 from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
@@ -391,7 +392,7 @@ class RagPipeline:
                 logger.warning(f"Collection doesn't exist for chapter {chapter_id}")
                 try:
                     doc = await asyncio.to_thread(lambda: Document.objects.filter(chapter__id=chapter_id).first())
-                    process_document_ingestion.delay(str(doc.id))
+                    transaction.on_commit(lambda:process_document_ingestion.delay(str(doc.id)))
                     return "Setting up your workspace. Please try again in a moment."
                 except Document.DoesNotExist:
                     return "Document not found. Please re-upload it."
