@@ -232,7 +232,7 @@ def process_document_for_existing_chapter(document_id, chapter_id):
         document.save(update_fields=['extracted_text', 'status'])
 
         logger.info("Text extracted, triggering ingestion...")
-        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Document updated with extracted text and status COMPLETED.")
+        logger.info("Text extracted, triggering ingestion...")
         process_document_ingestion.delay(str(document.id))
 
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] TASK FINISHED: process_document_for_existing_chapter")
