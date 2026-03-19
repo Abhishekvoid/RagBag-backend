@@ -61,35 +61,72 @@ class DocumentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("File exceeds maximum allowed size (50MB).")
         return file
 
+    # def create(self, validated_data):
+    #     logger.info("DocumentSerializer.create called.")
+    #     chapter_id = validated_data.pop('chapter_id', None)
+
+    #     validated_data['user'] = self.context['request'].user
+    #     file = validated_data.get('file')
+    #     if not file:
+    #         raise serializers.ValidationError("File required.") 
+
+        
+    #     if file:
+    #         validated_data['size_bytes'] = file.size
+    #         validated_data['file_type'] = file.name.split(".")[-1].lower()
+    #         if 'title' not in validated_data:
+    #             validated_data['title'] = file.name.rsplit('.', 1)[0]
+
+    #     chapter_instance = None
+    #     if chapter_id:
+    #         try:
+    #             chapter_instance = Chapter.objects.get(id=chapter_id, user=self.context['request'].user)
+    #             validated_data['chapter'] = chapter_instance
+    #             logger.info(f"  - Found existing chapter: {chapter_instance.id} - {chapter_instance.name}")
+    #         except Chapter.DoesNotExist:
+    #             logger.error(f"  - Chapter with id {chapter_id} not found for user {self.context['request'].user.id}.")
+    #             raise serializers.ValidationError({"chapter_id":"Chapter not found or does not belong to user."})
+    #     else:
+    #         logger.info("  - No chapter_id provided. Document will be standalone.")
+        
+    #     return super().create(validated_data)
     def create(self, validated_data):
         logger.info("DocumentSerializer.create called.")
+
+        request = self.context['request']
+        user = request.user
+
+        validated_data['user'] = user
+        file = validated_data.get('file')
+
+        # file metadata
+        validated_data['size_bytes'] = file.size
+        validated_data['file_type'] = file.name.split(".")[-1].lower()
+
+        if 'title' not in validated_data:
+            validated_data['title'] = file.name.rsplit('.', 1)[0]
+
         chapter_id = validated_data.pop('chapter_id', None)
 
-        validated_data['user'] = self.context['request'].user
-        file = validated_data.get('file')
-        if not file:
-            raise serializers.ValidationError("File required.")
-
-        
-        if file:
-            validated_data['size_bytes'] = file.size
-            validated_data['file_type'] = file.name.split(".")[-1].lower()
-            if 'title' not in validated_data:
-                validated_data['title'] = file.name.rsplit('.', 1)[0]
-
-        chapter_instance = None
+        # ✅ CASE 1: chapter provided
         if chapter_id:
-            try:
-                chapter_instance = Chapter.objects.get(id=chapter_id, user=self.context['request'].user)
-                validated_data['chapter'] = chapter_instance
-                logger.info(f"  - Found existing chapter: {chapter_instance.id} - {chapter_instance.name}")
-            except Chapter.DoesNotExist:
-                logger.error(f"  - Chapter with id {chapter_id} not found for user {self.context['request'].user.id}.")
-                raise serializers.ValidationError({"chapter_id":"Chapter not found or does not belong to user."})
+            chapter = Chapter.objects.get(id=chapter_id, user=user)
+            validated_data['chapter'] = chapter
+
+        # ✅ CASE 2: NO chapter → CREATE ONE IMMEDIATELY
         else:
-            logger.info("  - No chapter_id provided. Document will be standalone.")
-        
-        return super().create(validated_data)
+            logger.info("Creating chapter immediately for standalone doc")
+
+            chapter = Chapter.objects.create(
+                user=user,
+                name=validated_data['title'][:100],  # temp name
+            )
+
+            validated_data['chapter'] = chapter
+
+        document = super().create(validated_data)
+
+        return document
 # ------------ chapter -----------------
 
 class ChapterWriteSerializer(serializers.ModelSerializer):
