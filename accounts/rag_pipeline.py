@@ -353,51 +353,8 @@ class RagPipeline:
         logger.info(f"query: {query}")
         
     # ===== STEP 1: SELF-HEALING CHECK =====
-        try:
-            count_result = await async_qdrant_client.count(
-                collection_name=QDRANT_COLLECTION_NAME,
-                count_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="chapter_id",
-                            match=models.MatchValue(value=str(chapter_id)),
-                        ),
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=str(user_id))
-                        )
-                    ]
-                ),
-                exact=False,
-            )
-
-            vector_count = count_result.count
-            logger.info(f"found {vector_count} vector for this chapter")
-            if vector_count == 0:
-                logger.warning(f"No vectors found for chapter {chapter_id}")
-                
-                doc = await asyncio.to_thread(
-                    lambda: Document.objects.filter(chapter__id = chapter_id).first()
-                )
-
-                if not doc:
-                    return "document not found. please re-upload it."
-                
-                logger.info(f"document status: {doc.status}")
-
-                return "I'm preparing your document for chat. Please wait a few seconds."
-                    
-        except UnexpectedResponse as e:
-            if e.status_code == 404:
-                logger.warning(f"Collection doesn't exist for chapter {chapter_id}")
-                try:
-                    doc = await asyncio.to_thread(lambda: Document.objects.filter(chapter__id=chapter_id).first())
-                    transaction.on_commit(lambda:process_document_ingestion.delay(str(doc.id)))
-                    return "Setting up your workspace. Please try again in a moment."
-                except Document.DoesNotExist:
-                    return "Document not found. Please re-upload it."
-            else:
-                raise e
+        logger.info("Skipping count check — going directly to search")
+            
 
         
     # ===== STEP 2: INTELLIGENT QUERY EXPANSION =====
@@ -497,13 +454,19 @@ class RagPipeline:
             logger.error(f"Scroll check failed: {e}")
 
         
-        search_filter = make_chapter_user_filter(
-            chapter_id=str(chapter_id), 
-            user_id=str(user_id)
+        search_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="user_id",
+                    match=models.MatchValue(value=str(user_id))
+                ),
+                models.FieldCondition(
+                        key="chapter_id",
+                        match=models.MatchValue(value=str(chapter_id)),
+                ),
+            ]
         )
 
-       
-        
         logger.info("🔍 Searching vector database...")
         try: 
             async with latency_tracker.track_async("vector_serach"):
@@ -515,10 +478,23 @@ class RagPipeline:
                 logger.info(f" Retrieved {len(flat_results)} results from Qdrant")
 
             if not flat_results:
-                logger.error("❌ NO RESULTS!")
-                return "No relevant info in document."
-            
-            
+                logger.warning("Strict filter failed → fallback to user_id only")
+
+                fallback_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=str(user_id))
+                        )
+                    ]
+                )
+                flat_results = await search_qdrant_vectors(
+                    all_embeddings,
+                    filter=fallback_filter,
+                    limit_per_vector=15        
+                )
+
+
             query_words = set(query.lower().split())
             KEYWORD_BOOST = 0.05
 
