@@ -219,7 +219,7 @@ def process_document_for_existing_chapter(document_id, chapter_id):
 
 
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Extracting text from file: {document.file.name}")
-        extracted_text = get_text_from_file(document.file)
+        extracted_text = get_text_from_file(document.file, document.file_type)
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Text extracted. Length: {len(extracted_text)} characters.")
 
         document.extracted_text = extracted_text
