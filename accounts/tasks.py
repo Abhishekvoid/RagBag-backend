@@ -129,11 +129,6 @@ def chunk_text_by_token(text, tokenizer, chunk_size=200, chunk_overlap=50):
         start += chunk_size - chunk_overlap
     return chunks
 
-
-def extract_text_from_file(file_obj):
-   
-    return f"Extracted text from {file_obj.name}"
-
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def create_chapter_from_document(self, document_id: str):
     logger.info(f"[{document_id}] TASK STARTED: create_chapter_from_document")
@@ -224,7 +219,7 @@ def process_document_for_existing_chapter(document_id, chapter_id):
 
 
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Extracting text from file: {document.file.name}")
-        extracted_text = extract_text_from_file(document.file)
+        extracted_text = get_text_from_file(document.file)
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Text extracted. Length: {len(extracted_text)} characters.")
 
         document.extracted_text = extracted_text
