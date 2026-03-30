@@ -79,7 +79,7 @@ class RagPipeline:
         status = "unknown"
 
         logger.info(
-            "Rag_request_stared",
+            "rag_request_stared",
             extra= {
                 "event": "Rag_request_started",
                 "request_id": request_id,
@@ -105,7 +105,7 @@ class RagPipeline:
             else:
                 result = await self.handle_rag_search(refined_query, chapter_id, user_id, request_id)
             
-            status = "sucess"
+            status = "success"
             return result
         except Exception as e:
             status = "failed"
@@ -190,7 +190,7 @@ class RagPipeline:
                     )
                     result =  completion.choices[0].message.content.strip()
 
-                    status = "sucess"
+                    status = "success"
                     
                 
                 except LLMUnavailable:
@@ -282,7 +282,7 @@ class RagPipeline:
                 else:
                     result =  intent
 
-                status = "sucess"
+                status = "success"
             
             except LLMUnavailable:
                 logger.info(f"cannot decide the route -> llm is unavailable")
@@ -468,7 +468,7 @@ class RagPipeline:
 
         logger.info("🔍 Searching vector database...")
         try: 
-            async with latency_tracker.track_async("vector_serach"):
+            async with latency_tracker.track_async("vector_search"):
                 flat_results = await search_qdrant_vectors(
                     all_embeddings, 
                     filter=search_filter, 
@@ -494,14 +494,15 @@ class RagPipeline:
                 )
 
 
-            query_words = set(query.lower().split())
+            import re
+            query_words = set(re.findall(r"\w+", query.lower()))
             KEYWORD_BOOST = 0.05
 
             for r in flat_results:
                 if r.payload and "text" in r.payload:
-                    text_words = r.payload["text"].lower()
+                    text_words = r.payload.get["text", ""].lower()
                     keyword_hits = sum(1 for w in query_words if w in text_words)
-                    r.score += KEYWORD_BOOST * keyword_hits 
+                    r.score = float(r.score) + (KEYWORD_BOOST * keyword_hits)
 
             flat_results.sort(key=lambda x: x.score, reverse=True)
 
@@ -525,6 +526,7 @@ class RagPipeline:
         # reranking 
 
         logger.info("Reranking results by relevance...")
+        flat_results = flat_results[:40]
 
 # deduplicate
         seen = set()
@@ -545,6 +547,7 @@ class RagPipeline:
                 if reranker:
                     scores = reranker.predict(pairs, batch_size=32, show_progress_bar=False)
                 else:
+                    logger.warning("Reranker not loaded, skipping reranking")
                     scores = [0] *len(pairs)
             
             # ✅ FIXED: Safe numpy check + proper score assignment
