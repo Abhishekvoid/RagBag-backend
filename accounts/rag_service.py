@@ -1,4 +1,3 @@
-# backend/rag_service.py
 
 import logging
 import asyncio
@@ -46,7 +45,7 @@ async def search_qdrant_vectors(
 
     for v in vectors:
         tasks.append(
-            async_qdrant_client.query_points(
+            async_qdrant_client.search(
                 collection_name=QDRANT_COLLECTION,
                 query=models.Query(vector=v), 
                 query_filter=filter,  
@@ -90,13 +89,7 @@ async def search_qdrant_vectors(
     # SORT BY SCORE
     unique.sort(key=lambda x: getattr(x, "score", 0), reverse=True)
 
-
-    # LIMIT RESULTS (IMPORTANT)
-    final_results = unique[:MAX_RESULTS]
-
-    logger.info(f"Final results after dedup + limit: {len(final_results)}")
-
-    return final_results
+    return unique[:20]
 
 
 # STORE CONTEXT (OPTIONAL CACHE)
