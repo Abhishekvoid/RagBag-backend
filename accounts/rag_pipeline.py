@@ -500,7 +500,7 @@ class RagPipeline:
 
             for r in flat_results:
                 if r.payload and "text" in r.payload:
-                    text_words = r.payload.get["text", ""].lower()
+                    text_words = r.payload.get("text", "").lower()
                     keyword_hits = sum(1 for w in query_words if w in text_words)
                     r.score = float(r.score) + (KEYWORD_BOOST * keyword_hits)
 
