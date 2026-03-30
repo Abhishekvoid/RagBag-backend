@@ -19,35 +19,70 @@ async def embed_texts(texts: Union[str, List[str]]) -> List[List[float]]:
 
 async def search_qdrant_vectors(vectors: List[List[float]], filter: models.Filter | None, limit_per_vector:int=5):
    
-    requests = [
-        models.SearchRequest(
-            vector=v,
-            filter=filter,
-            limit=limit_per_vector,
-            with_payload=True,
-            with_vector=False
-        )
-        for v in vectors
-    ]
+    # requests = [
+    #     models.SearchRequest(
+    #         vector=v,
+    #         filter=filter,
+    #         limit=limit_per_vector,
+    #         with_payload=True,
+    #         with_vector=False
+    #     )
+    #     for v in vectors
+    # ]
 
-    results = await async_qdrant_client.search_batch(
-        collection_name="studywise_documents",
-        requests=requests
-    )
+    # results = await async_qdrant_client.search_batch(
+    #     collection_name="studywise_documents",
+    #     requests=requests
+    # )
+
+    # flat = []
+
+    # for batch in results:
+    #     flat.extend(batch)
+
+    # logger.info(f"search_batch returned {len(results)} batches")
+
+    # for batch in results:
+    #     logger.info(f"batch size: {len(batch)}")
+
+    # return flat
+    
+    tasks = []
+
+    for v in vectors:
+        tasks.append(
+            async_qdrant_client.search(
+                collection_name="studywise_documents",
+                query_vector=v,
+                query_filter=filter,
+                limit=limit_per_vector,
+                with_payload=True,
+                with_vectors=False,  # ✅ FIXED
+            )
+        )
+
+    results = await asyncio.gather(*tasks)
+
+    logger.info(f"Executed {len(results)} parallel searches")
 
     flat = []
-
     for batch in results:
         flat.extend(batch)
 
-    logger.info(f"search_batch returned {len(results)} batches")
+    logger.info(f"Total results: {len(flat)}")
 
-    for batch in results:
-        logger.info(f"batch size: {len(batch)}")
+    seen = set()
+    unique = []
 
-    return flat
-    
-    
+    for r in flat:
+        if r.id not in seen:
+            seen.add(r.id)
+            unique.append(r)
+
+    # sort by score
+    unique.sort(key=lambda x: x.score, reverse=True)
+
+    return unique
     
 
 async def store_context_to_qdrant(payload: dict, vector: List[float], id: str = None):

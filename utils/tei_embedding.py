@@ -17,7 +17,7 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
-TEI_URL = os.getenv("TEI_URL", "http://localhost:8080/embed")
+TEI_URL = "http://localhost:8080/embed" # os.getenv( "TEI_URL"), 
 TEI_TIMEOUT = float(os.getenv("TEI_TIMEOUT", 10.0))
 EXPECTED_DIM = int(os.getenv("EMBEDDING_DIM", 384))
 

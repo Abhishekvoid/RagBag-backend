@@ -1,6 +1,6 @@
 import os
 
-broker_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+broker_url = os.getenv("redis://localhost:6379/0") # "REDIS_URL", 
 result_backend = broker_url
 
 
