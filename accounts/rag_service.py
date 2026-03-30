@@ -1,104 +1,142 @@
 # backend/rag_service.py
+
 import logging
 import asyncio
-from typing import List, Union 
-from .ai_clients import async_groq_client, async_qdrant_client
-from utils.tei_embedding import TEIEmbeddingClient
+from typing import List, Union
+
 from qdrant_client import models
+from .ai_clients import async_qdrant_client
+from utils.tei_embedding import TEIEmbeddingClient
 
 tei_client = TEIEmbeddingClient()
 logger = logging.getLogger(__name__)
 
+QDRANT_COLLECTION = "studywise_documents"
+MAX_RESULTS = 20  # prevent overload
 
+
+
+# EMBEDDINGS
 
 async def embed_texts(texts: Union[str, List[str]]) -> List[List[float]]:
     if isinstance(texts, str):
-        texts = [texts]  
+        texts = [texts]
+
     embeddings = await tei_client.embed_texts(texts)
+
+    if not embeddings or not isinstance(embeddings, list):
+        raise ValueError("Invalid embeddings returned from TEI")
+
     return embeddings
 
-async def search_qdrant_vectors(vectors: List[List[float]], filter: models.Filter | None, limit_per_vector:int=5):
-   
-    # requests = [
-    #     models.SearchRequest(
-    #         vector=v,
-    #         filter=filter,
-    #         limit=limit_per_vector,
-    #         with_payload=True,
-    #         with_vector=False
-    #     )
-    #     for v in vectors
-    # ]
 
-    # results = await async_qdrant_client.search_batch(
-    #     collection_name="studywise_documents",
-    #     requests=requests
-    # )
 
-    # flat = []
+# VECTOR SEARCH (PRODUCTION)
 
-    # for batch in results:
-    #     flat.extend(batch)
+async def search_qdrant_vectors(
+    vectors: List[List[float]],
+    filter: models.Filter | None,
+    limit_per_vector: int = 5,
+):
+    if not vectors:
+        logger.warning("No vectors provided to search")
+        return []
 
-    # logger.info(f"search_batch returned {len(results)} batches")
-
-    # for batch in results:
-    #     logger.info(f"batch size: {len(batch)}")
-
-    # return flat
-    
     tasks = []
 
     for v in vectors:
         tasks.append(
-            async_qdrant_client.search(
-                collection_name="studywise_documents",
-                query_vector=v,
-                query_filter=filter,
+            async_qdrant_client.query_points(
+                collection_name=QDRANT_COLLECTION,
+                query=models.Query(vector=v), 
+                query_filter=filter,  
                 limit=limit_per_vector,
                 with_payload=True,
-                with_vectors=False,  # ✅ FIXED
+                with_vectors=False,
             )
         )
 
-    results = await asyncio.gather(*tasks)
+    try:
+        results = await asyncio.gather(*tasks)
+    except Exception as e:
+        logger.error(f"Qdrant query failed: {e}", exc_info=True)
+        return []
 
     logger.info(f"Executed {len(results)} parallel searches")
 
+
+    # FLATTEN RESULTS
     flat = []
-    for batch in results:
-        flat.extend(batch)
+    for res in results:
+        if hasattr(res, "points") and res.points:
+            flat.extend(res.points)
 
-    logger.info(f"Total results: {len(flat)}")
+    logger.info(f"Total raw results: {len(flat)}")
 
-    seen = set()
+    if not flat:
+        return []
+
+
+    # DEDUPLICATE (by id)
+    seen_ids = set()
     unique = []
 
     for r in flat:
-        if r.id not in seen:
-            seen.add(r.id)
+        if r.id not in seen_ids:
+            seen_ids.add(r.id)
             unique.append(r)
 
-    # sort by score
-    unique.sort(key=lambda x: x.score, reverse=True)
 
-    return unique
-    
+    # SORT BY SCORE
+    unique.sort(key=lambda x: getattr(x, "score", 0), reverse=True)
 
-async def store_context_to_qdrant(payload: dict, vector: List[float], id: str = None):
-    """
-    Optional: write a new point into Qdrant to act as cached context.
-    payload: dict with text, chapter_id, user_id...
-    vector: embedding vector for the payload
-    """
-    point = models.PointStruct(id=id, vector=vector, payload=payload) if id else models.PointStruct(vector=vector, payload=payload)
-    # upsert expects list of points
-    await async_qdrant_client.upsert(collection_name="studywise_documents", points=[point])
-    logger.info("Stored context to Qdrant (maybe cache)")
 
-# small helper to build Qdrant filter
+    # LIMIT RESULTS (IMPORTANT)
+    final_results = unique[:MAX_RESULTS]
+
+    logger.info(f"Final results after dedup + limit: {len(final_results)}")
+
+    return final_results
+
+
+# STORE CONTEXT (OPTIONAL CACHE)
+
+async def store_context_to_qdrant(
+    payload: dict,
+    vector: List[float],
+    id: str = None,
+):
+    try:
+        point = (
+            models.PointStruct(id=id, vector=vector, payload=payload)
+            if id
+            else models.PointStruct(vector=vector, payload=payload)
+        )
+
+        await async_qdrant_client.upsert(
+            collection_name=QDRANT_COLLECTION,
+            points=[point],
+        )
+
+        logger.info("Stored context to Qdrant")
+
+    except Exception as e:
+        logger.error(f"Failed to store context: {e}", exc_info=True)
+
+
+
+#  FILTER BUILDER
+
 def make_chapter_user_filter(chapter_id: str, user_id: str):
-    return models.Filter(must=[
-        models.FieldCondition(key="chapter_id", match=models.MatchValue(value=str(chapter_id))),
-        models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id)))
-    ])
+    return models.Filter(
+        must=[
+            models.FieldCondition(
+                key="chapter_id",
+                match=models.MatchValue(value=str(chapter_id)),
+            ),
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=str(user_id)),
+            ),
+        ]
+    )
