@@ -1,4 +1,4 @@
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, AsyncQdrantClient
 import os
 
 QDRANT_URL = os.getenv("QDRANT_URL")
@@ -28,3 +28,5 @@ client.create_collection(
 )
 
 print("✅ Collection recreated with 384 dims")
+
+print(dir(AsyncQdrantClient))
