@@ -1,6 +1,7 @@
 # backend/rag_pipeline.py
 
 import os
+import re
 import asyncio
 import logging
 from django.conf import settings
@@ -64,12 +65,17 @@ class RagPipeline:
         
 
     def is_greeting(self, user_query: str) -> bool:
-        greetings = {
-        "hi","hii","hello","hey","yo","sup",
-        "good morning","good afternoon","good evening"
-        }
+        greetings = [
+            "hi", "hello", "hey", "yo", "sup",
+            "good morning", "good afternoon", "good evening"
+        ]
 
-        return user_query.lower().strip() in greetings
+        query = user_query.lower().strip()
+
+        # (hiiii → hii)
+        query = re.sub(r"(.)\1{2,}", r"\1\1", query)
+
+        return any(re.search(rf"\b{greet}\b", query) for greet in greetings)
         
     async def run(self, user_query, chat_history, chapter_id, user_id):
         # step 1: contextualization
@@ -88,6 +94,10 @@ class RagPipeline:
             }
         )
         try:
+
+            if self.is_greeting(user_query):
+                return await self.handle_greeting(user_query)
+            
             refined_query = await self.contextualize_query(user_query, chat_history, request_id, user_id, chapter_id)
             logger.info(f"Refined query: {refined_query}")
 
@@ -96,9 +106,7 @@ class RagPipeline:
             logger.info(f"Detected intent: {intent}")
 
             # step 3: Execute strategy
-            if self.is_greeting(user_query):
-                result =  await self.handle_greeting(user_query)
-            elif intent == "summary":
+            if intent == "summary":
                 result =  await self.handle_summary(chapter_id, user_id)
             elif intent == "ambiguous":
                 result =  "I'm not sure I understand. Could you clarify your question about this document?"
