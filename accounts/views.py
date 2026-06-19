@@ -148,6 +148,18 @@ class SubjectListCreateView(generics.ListCreateAPIView):
 
         return Response(subjects_data)
 
+class SubjectDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
+
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return SubjectWriteSerializer
+        return SubjectReadSerializer
+
+    def get_queryset(self):
+        return Subject.objects.filter(user=self.request.user)
+
 # ------------ documents ------------
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -289,7 +301,7 @@ class ChapterMessageListView(generics.ListAPIView):
 # -------------------- auth ---------------- 
 
 class OAuthSignInView(APIView):
-    permissions_classes = [AllowAny]
+    permission_classes = [AllowAny]
 
     def post (self,request, *args, **kwargs):
         email =  request.data.get("email")
@@ -424,7 +436,7 @@ class RAGChatMessageView(APIView):
             document = Document.objects.filter(chapter__id=chapter_id, user=user).order_by("-created_at").first()
 
             if not document:
-                return self.response(
+                return Response(
                     {"error": "Document not found for this chapter."},
                     status=status.HTTP_404_NOT_FOUND
                 )
@@ -504,8 +516,9 @@ class GenerateQuestionsView(APIView):
             Based on the following text, generate 5-7 challenging study questions that a student could use to test their knowledge.
             For each question, provide a concise, accurate answer based only on the text.
 
-            Format your response as a valid JSON array of objects, where each object has a "question" key and an "answer" key.
-            Example: [{{"question": "What is the capital of France?", "answer": "Paris."}}]
+            Format your response as a valid JSON object with a single key "questions".
+            The value must be an array of objects, where each object has a "question" key and an "answer" key.
+            Example: {{"questions": [{{"question": "What is the capital of France?", "answer": "Paris."}}]}}
 
             TEXT:
             {full_text[:8000]} # Use a generous context window
@@ -657,6 +670,16 @@ class FlashCardDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
 
         return GenerateFlashCards.objects.filter(user=self.request.user)
+
+class ChapterFlashCardListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = GeneratedFlashCardsSerializer
+
+    def get_queryset(self):
+        return GenerateFlashCards.objects.filter(
+            chapter_id=self.kwargs['chapter_id'],
+            user=self.request.user,
+        )
 
 # class FlashCardListView(generics.ListAPIView):
 #     permission_classes = [IsAuthenticated]
