@@ -30,7 +30,7 @@ async def ask_llm(groq_client, messages, *, model, json_mode=False, **kwargs):
             )
 
             try:
-                usage = getattr(response, "uasge", None)
+                usage = getattr(response, "usage", None)
 
                 if usage:
                     input_tokens = getattr(usage, "prompt_tokens", 0)

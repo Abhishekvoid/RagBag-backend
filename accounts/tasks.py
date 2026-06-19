@@ -323,7 +323,7 @@ def process_document_ingestion(self, document_id: str):
             # Truncate oversized chunks
             chunk_batch = [c[:MAX_CHUNK_LEN] for c in chunk_batch]
             
-            logger.info(f"[{correlation_id}] Embedding batch {i//BATCH_SIZE + 1}/{(len(text_chunks)-1)//BATCH_SIZE + 1} ({len(chunk_batch)} chunks)")
+            logger.info(f"[{correlation_id}] Embedding batch {i//BATCH + 1}/{(len(text_chunks)-1)//BATCH + 1} ({len(chunk_batch)} chunks)")
 
             
             try:

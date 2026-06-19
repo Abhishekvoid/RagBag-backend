@@ -8,6 +8,7 @@ class CostTracker:
         "tei-embedding-3-small": {"input": 0.00002 / 1000},
         "grok-4": {"input": 0.0001 / 1000, "output": 0.0003 / 1000},
         "gemini-1.5-pro": {"input": 0.00025 / 1000, "output": 0.00075 / 1000},
+        "llama-3.1-8b-instant": {"input": 0.05 / 1_000_000, "output": 0.08 / 1_000_000},
     }
     
     def __init__(self):

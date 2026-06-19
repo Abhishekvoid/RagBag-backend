@@ -5,6 +5,7 @@ from .views import (
     ChatMessageView,
     ChatSessionView,
     SubjectListCreateView,
+    SubjectDetailView,
     ChapterListCreateView,
     ChapterDetailView,
     ChapterMessageListView,
@@ -15,6 +16,7 @@ from .views import (
     GenerateQuestionsView,
     GenerateFlashCardView,
     FlashCardDetailView,
+    ChapterFlashCardListView,
     MeView,
 )
 
@@ -28,7 +30,7 @@ urlpatterns = [
 
     # Subject endpoints
     path('subjects/', SubjectListCreateView.as_view(), name='subjects-list-create'),
-    path('subjects/<uuid:id>/',SubjectListCreateView.as_view(), name='subject-detail'),
+    path('subjects/<uuid:id>/',SubjectDetailView.as_view(), name='subject-detail'),
 
     # Chapter endpoints
     path('chapters/', ChapterListCreateView.as_view(), name='chapters-list-create'),
@@ -47,7 +49,8 @@ urlpatterns = [
 
     path('chapters/<uuid:chapter_id>/generate-questions/', GenerateQuestionsView.as_view(), name='generate-questions'),
 
-    path('chapters/<uuid:chapter_id>/generate-flashcards/', GenerateFlashCardView.as_view(), name='generate-flashcards'), 
+    path('chapters/<uuid:chapter_id>/generate-flashcards/', GenerateFlashCardView.as_view(), name='generate-flashcards'),
+    path('chapters/<uuid:chapter_id>/flashcards/', ChapterFlashCardListView.as_view(), name='chapter-flashcards-list'),
     path('flashcards/<uuid:id>/', FlashCardDetailView.as_view(), name='flashcards-detail'),
 
 ]
