@@ -61,34 +61,31 @@ class DocumentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("File exceeds maximum allowed size (50MB).")
         return file
 
+    def validate_chapter(self, chapter):
+        # `chapter` is a declared FK field, so DRF resolves the incoming UUID
+        # into a Chapter instance. Enforce that it belongs to the requesting user.
+        if chapter is not None and chapter.user_id != self.context['request'].user.id:
+            raise serializers.ValidationError("Chapter not found or does not belong to user.")
+        return chapter
+
     def create(self, validated_data):
         logger.info("DocumentSerializer.create called.")
-        chapter_id = validated_data.pop('chapter_id', None)
 
         validated_data['user'] = self.context['request'].user
         file = validated_data.get('file')
         if not file:
-            raise serializers.ValidationError("File required.") 
+            raise serializers.ValidationError("File required.")
 
-        
-        if file:
-            validated_data['size_bytes'] = file.size
-            validated_data['file_type'] = file.name.split(".")[-1].lower()
-            if 'title' not in validated_data:
-                validated_data['title'] = file.name.rsplit('.', 1)[0]
+        validated_data['size_bytes'] = file.size
+        validated_data['file_type'] = file.name.split(".")[-1].lower()
+        if 'title' not in validated_data:
+            validated_data['title'] = file.name.rsplit('.', 1)[0]
 
-        chapter_instance = None
-        if chapter_id:
-            try:
-                chapter_instance = Chapter.objects.get(id=chapter_id, user=self.context['request'].user)
-                validated_data['chapter'] = chapter_instance
-                logger.info(f"  - Found existing chapter: {chapter_instance.id} - {chapter_instance.name}")
-            except Chapter.DoesNotExist:
-                logger.error(f"  - Chapter with id {chapter_id} not found for user {self.context['request'].user.id}.")
-                raise serializers.ValidationError({"chapter_id":"Chapter not found or does not belong to user."})
+        if validated_data.get('chapter') is not None:
+            logger.info(f"  - Linking document to chapter: {validated_data['chapter'].id}")
         else:
-            logger.info("  - No chapter_id provided. Document will be standalone.")
-        
+            logger.info("  - No chapter provided. Document will be standalone.")
+
         return super().create(validated_data)
     # def create(self, validated_data):
     #     logger.info("DocumentSerializer.create called.")

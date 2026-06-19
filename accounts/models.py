@@ -145,7 +145,7 @@ class ChatMessage(models.Model):
 # --------------- Question generation
 
 class GenerateQuestion(models.Model):
-    id =models.UUIDField(primary_key=True, default=uuid.uuid4  , editable= True)
+    id =models.UUIDField(primary_key=True, default=uuid.uuid4  , editable= False)
     chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='generated_questions')
     question_text = models.TextField()
     answer_text = models.TextField()
