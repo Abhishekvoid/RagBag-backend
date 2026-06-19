@@ -18,7 +18,7 @@ class StageLatencyTracker:
         
         with self._lock:
             if stage not in self._metrics:
-                self._metrics[stage] = deque(maxlen=self.window_size)
+                self._metrics[stage] = deque(maxlen=self._window_size)
             self._metrics[stage].append(latency_ms)
         
         return result
