@@ -17,7 +17,7 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
-TEI_URL = "http://localhost:8080/embed" # os.getenv( "TEI_URL"), 
+TEI_URL = os.getenv("TEI_URL", "http://localhost:8080/embed")
 TEI_TIMEOUT = float(os.getenv("TEI_TIMEOUT", 10.0))
 EXPECTED_DIM = int(os.getenv("EMBEDDING_DIM", 384))
 
@@ -56,11 +56,10 @@ class TEIEmbeddingClient:
         async with self.slot_manager.slot():
             
             start = time.perf_counter()
-            async with httpx.AsyncClient(timeout=TEI_TIMEOUT,limits=httpx.Limits(max_connections=100)) as client:
-                response = await client.post(
-                        TEI_URL,
-                        json = {"inputs": texts},
-                    )
+            response = await self.client.post(
+                    TEI_URL,
+                    json = {"inputs": texts},
+                )
 
             response.raise_for_status()
             embeddings = response.json()
