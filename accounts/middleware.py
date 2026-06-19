@@ -1,5 +1,6 @@
 # in accounts/middleware.py
 
+from urllib.parse import parse_qs
 from django.contrib.auth.models import AnonymousUser
 from channels.db import database_sync_to_async
 from channels.middleware import BaseMiddleware
@@ -22,8 +23,8 @@ class JWTAuthMiddleware(BaseMiddleware):
     async def __call__(self, scope, receive, send):
         # Get the token from the query string
         query_string = scope.get("query_string", b"").decode("utf-8")
-        params = dict(p.split("=") for p in query_string.split("&"))
-        token = params.get("token")
+        params = parse_qs(query_string)
+        token = params.get("token", [None])[0]
 
         # Get the user and attach it to the connection's scope
         scope['user'] = await get_user(token)
