@@ -149,3 +149,97 @@ class DocumentRetryTests(TestCase):
             file_type="txt", status=Document.STATUS_FAILED)
         res = self.client.post(f"/auth/documents/{doc.id}/retry/")
         self.assertEqual(res.status_code, 404)
+
+
+class BuildAnswerMessagesTests(TestCase):
+    def test_returns_system_then_user_with_context_and_query(self):
+        from accounts.rag_pipeline import build_answer_messages
+        msgs = build_answer_messages("CTX-TEXT", "What is X?")
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0]["role"], "system")
+        self.assertEqual(msgs[1]["role"], "user")
+        self.assertIn("CTX-TEXT", msgs[1]["content"])
+        self.assertIn("What is X?", msgs[1]["content"])
+        self.assertIn("tutor", msgs[0]["content"].lower())
+        self.assertIn("Beyond your notes", msgs[0]["content"])
+
+
+class ParseFollowupsTests(TestCase):
+    def test_valid_json(self):
+        from accounts.rag_pipeline import parse_followups
+        raw = '{"followups": ["What is chaining?", "When resize?", "Load factor?"]}'
+        self.assertEqual(
+            parse_followups(raw),
+            ["What is chaining?", "When resize?", "Load factor?"],
+        )
+
+    def test_caps_at_three_and_strips(self):
+        from accounts.rag_pipeline import parse_followups
+        raw = '{"followups": ["  a ", "b", "c", "d"]}'
+        self.assertEqual(parse_followups(raw), ["a", "b", "c"])
+
+    def test_drops_empty_entries(self):
+        from accounts.rag_pipeline import parse_followups
+        raw = '{"followups": ["", "  ", "real one"]}'
+        self.assertEqual(parse_followups(raw), ["real one"])
+
+    def test_garbage_returns_empty(self):
+        from accounts.rag_pipeline import parse_followups
+        self.assertEqual(parse_followups("not json"), [])
+        self.assertEqual(parse_followups('{"nope": 1}'), [])
+
+
+class BuildSourcesTests(TestCase):
+    def test_dedup_and_snippet(self):
+        from types import SimpleNamespace
+        from accounts.rag_pipeline import build_sources
+        results = [
+            SimpleNamespace(payload={"document_id": "d1", "text": "A" * 200}),
+            SimpleNamespace(payload={"document_id": "d1", "text": "dup"}),
+            SimpleNamespace(payload={"document_id": "d2", "text": "second"}),
+        ]
+        srcs = build_sources(results)
+        self.assertEqual(len(srcs), 2)
+        self.assertEqual(srcs[0]["document_id"], "d1")
+        self.assertEqual(len(srcs[0]["snippet"]), 140)
+        self.assertEqual(srcs[1]["document_id"], "d2")
+
+    def test_caps_at_three(self):
+        from types import SimpleNamespace
+        from accounts.rag_pipeline import build_sources
+        results = [
+            SimpleNamespace(payload={"document_id": f"d{i}", "text": "t"})
+            for i in range(6)
+        ]
+        self.assertEqual(len(build_sources(results)), 3)
+
+
+class RagChatResponseShapeTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="c@b.com", password="pw12345", name="C")
+        self.client.force_authenticate(self.user)
+
+    def test_response_includes_sources_and_followups(self):
+        from unittest.mock import patch
+        from accounts.models import Chapter, Document
+        chapter = Chapter.objects.create(user=self.user, name="Ch")
+        doc = Document.objects.create(
+            user=self.user, chapter=chapter, title="My Doc",
+            file="uploads/x.txt", file_type="txt",
+            status=Document.STATUS_COMPLETED)
+        fake = {
+            "answer": "The answer.",
+            "sources": [{"document_id": str(doc.id), "snippet": "snip"}],
+            "followups": ["Next q?"],
+        }
+        with patch("accounts.views.rag_pipeline.run", return_value=fake):
+            res = self.client.post(
+                "/auth/rag-chat/",
+                {"chapter": str(chapter.id), "text": "hi"},
+                format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.data["text"], "The answer.")
+        self.assertEqual(res.data["followups"], ["Next q?"])
+        self.assertEqual(res.data["sources"][0]["title"], "My Doc")

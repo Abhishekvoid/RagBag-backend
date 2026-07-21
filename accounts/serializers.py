@@ -189,8 +189,8 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model =  ChatMessage
 
-        fields = ['id', 'session', 'sender', 'text', 'created_at', 'citations', 'tokens', 'error']
-        read_only_fields = ['id', 'created_at', 'citations', 'tokens', 'error']
+        fields = ['id', 'session', 'sender', 'text', 'created_at', 'citations', 'tokens', 'error', 'suggestions']
+        read_only_fields = ['id', 'created_at', 'citations', 'tokens', 'error', 'suggestions']
 
 
 class RAGChatMessageSerializer(serializers.Serializer):
