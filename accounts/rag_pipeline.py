@@ -23,7 +23,7 @@ from .rag_service import (
     search_vectors,
     make_chapter_user_filter,
 )
-from utils.reranking_crossencoder import reranker
+from utils.tei_rerank import rerank_client
 from utils.metrics.latency import latency_tracker
 from utils.metrics.retrieval import retrieval_evaluator
 from utils.metrics.cost import cost_tracker
@@ -605,29 +605,22 @@ class RagPipeline:
 
         if len(unique_results) > 5:
             RERANK_LIMIT = min(len(unique_results), 20)
-            pairs = [[query, r.payload["text"]] for r in unique_results[:RERANK_LIMIT]]
-            
+            candidates = unique_results[:RERANK_LIMIT]
+            texts = [r.payload["text"] for r in candidates]
+
             async with latency_tracker.track_async("reranking"):
-                if reranker:
-                    scores = reranker.predict(pairs, batch_size=32, show_progress_bar=False)
-                else:
-                    logger.warning("Reranker not loaded, skipping reranking")
-                    scores = [0] *len(pairs)
-            
-            # ✅ FIXED: Safe numpy check + proper score assignment
-            if len(scores) == 0:
-                logger.warning("Reranker returned no scores")
-                final_results = unique_results[:8]
-            else:
-                # Apply scores ONLY to reranked items
-                for i, r in enumerate(unique_results[:RERANK_LIMIT]):
-                    r.score = float(scores[i])
-                
-                # ✅ FIXED: Sort ONLY scored items
-                scored_results = unique_results[:RERANK_LIMIT]
-                final_results = sorted(scored_results, key=lambda x: x.score, reverse=True)[:8]
-                
+                scores = await rerank_client.rerank(query, texts)
+
+            if scores:
+                # Apply rerank scores to the candidates and reorder.
+                for r, s in zip(candidates, scores):
+                    r.score = float(s)
+                final_results = sorted(candidates, key=lambda x: x.score, reverse=True)[:8]
                 logger.info(f"Reranked {len(final_results)} chunks. Top score={final_results[0].score:.3f}")
+            else:
+                # Rerank service unavailable — keep the vector + keyword order.
+                logger.warning("Rerank unavailable; falling back to vector ordering")
+                final_results = unique_results[:8]
         else:
             final_results = unique_results[:8]
 
