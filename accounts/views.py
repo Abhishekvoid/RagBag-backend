@@ -35,12 +35,6 @@ rag_pipeline = RagPipeline(
 LLM_MODEL = "llama-3.1-8b-instant"
 
 
-v = os.getenv("GROQ_API_KEY")
-logger.info("GROQ_API_KEY repr: %s", repr(v) if v is not None else "None")
-if v:
-    logger.info("GROQ_API_KEY masked: %s...%s", v[:4], v[-4:])
-
-
 class RegisterAPIView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_classes = [UserRateThrottle]  

@@ -175,11 +175,11 @@ AWS_QUERYSTRING_AUTH = False
 MEDIA_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/object/public/{AWS_STORAGE_BUCKET_NAME}/"
 
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_INDEX = os.getenv("PINECONE_INDEX", "studywise-documents")
 
-if not DEBUG and (not QDRANT_URL or not QDRANT_API_KEY):
-    raise ValueError("QDRANT_URL and QDRANT_API_KEY required in production")
+if not DEBUG and not PINECONE_API_KEY:
+    raise ValueError("PINECONE_API_KEY required in production")
 # Database
 DATABASES = {
     'default': {
@@ -232,6 +232,11 @@ LOGGING = {
             "handlers": ["console"],
             "level": "INFO",
         },
+        # Silence the per-request HTTP log wall from httpx/httpcore (Groq, TEI,
+        # HuggingFace hub) and the low-level HTTP/2 framing chatter.
+        "httpx": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "httpcore": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "hpack": {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }
 
