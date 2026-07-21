@@ -18,6 +18,7 @@ from .views import (
     GenerateFlashCardView,
     FlashCardDetailView,
     ChapterFlashCardListView,
+    ChapterQuestionListView,
     MeView,
 )
 
@@ -50,6 +51,7 @@ urlpatterns = [
     
 
     path('chapters/<uuid:chapter_id>/generate-questions/', GenerateQuestionsView.as_view(), name='generate-questions'),
+    path('chapters/<uuid:chapter_id>/questions/', ChapterQuestionListView.as_view(), name='chapter-questions-list'),
 
     path('chapters/<uuid:chapter_id>/generate-flashcards/', GenerateFlashCardView.as_view(), name='generate-flashcards'),
     path('chapters/<uuid:chapter_id>/flashcards/', ChapterFlashCardListView.as_view(), name='chapter-flashcards-list'),

@@ -214,6 +214,152 @@ class BuildSourcesTests(TestCase):
         self.assertEqual(len(build_sources(results)), 3)
 
 
+class CascadeDeleteTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="del@b.com", password="pw12345", name="D")
+        self.client.force_authenticate(self.user)
+
+    def _doc(self, chapter, name="uploads/x.txt"):
+        from accounts.models import Document
+        return Document.objects.create(
+            user=self.user, chapter=chapter, title="t",
+            file=name, file_type="txt",
+            status=Document.STATUS_COMPLETED)
+
+    def test_delete_chapter_purges_documents_and_enqueues_cleanup(self):
+        from unittest.mock import patch
+        from accounts.models import Chapter, Document, GenerateQuestion
+        chapter = Chapter.objects.create(user=self.user, name="Ch")
+        doc = self._doc(chapter, "uploads/a.txt")
+        GenerateQuestion.objects.create(
+            chapter=chapter, question_text="q", answer_text="a")
+
+        with patch("accounts.views.cleanup_document_data") as mock_task:
+            res = self.client.delete(f"/auth/chapters/{chapter.id}/")
+            self.assertEqual(res.status_code, 204, res.content)
+            mock_task.delay.assert_called_once_with(
+                [str(doc.id)], ["uploads/a.txt"])
+
+        self.assertFalse(Chapter.objects.filter(id=chapter.id).exists())
+        self.assertFalse(Document.objects.filter(id=doc.id).exists())
+        self.assertEqual(GenerateQuestion.objects.count(), 0)
+
+    def test_delete_subject_purges_all_chapter_documents(self):
+        from unittest.mock import patch
+        from accounts.models import Subject, Chapter, Document
+        subject = Subject.objects.create(user=self.user, name="Subj")
+        ch1 = Chapter.objects.create(user=self.user, subject=subject, name="C1")
+        ch2 = Chapter.objects.create(user=self.user, subject=subject, name="C2")
+        d1 = self._doc(ch1, "uploads/1.txt")
+        d2 = self._doc(ch2, "uploads/2.txt")
+
+        with patch("accounts.views.cleanup_document_data") as mock_task:
+            res = self.client.delete(f"/auth/subjects/{subject.id}/")
+            self.assertEqual(res.status_code, 204, res.content)
+            self.assertTrue(mock_task.delay.called)
+            doc_ids, files = mock_task.delay.call_args[0]
+            self.assertCountEqual(doc_ids, [str(d1.id), str(d2.id)])
+            self.assertCountEqual(files, ["uploads/1.txt", "uploads/2.txt"])
+
+        self.assertFalse(Subject.objects.filter(id=subject.id).exists())
+        self.assertEqual(Chapter.objects.filter(id__in=[ch1.id, ch2.id]).count(), 0)
+        self.assertEqual(Document.objects.count(), 0)
+
+    def test_delete_chapter_keeps_chat_sessions(self):
+        from unittest.mock import patch
+        from accounts.models import Chapter, ChatSession
+        chapter = Chapter.objects.create(user=self.user, name="Ch")
+        session = ChatSession.objects.create(user=self.user, chapter=chapter)
+
+        with patch("accounts.views.cleanup_document_data"):
+            res = self.client.delete(f"/auth/chapters/{chapter.id}/")
+            self.assertEqual(res.status_code, 204, res.content)
+
+        session.refresh_from_db()
+        self.assertIsNone(session.chapter_id)
+
+    def test_cannot_delete_foreign_chapter(self):
+        from accounts.models import Chapter
+        other = User.objects.create_user(
+            email="x@b.com", password="pw12345", name="X")
+        chapter = Chapter.objects.create(user=other, name="Ch")
+        with patch_cleanup():
+            res = self.client.delete(f"/auth/chapters/{chapter.id}/")
+        self.assertEqual(res.status_code, 404)
+        self.assertTrue(Chapter.objects.filter(id=chapter.id).exists())
+
+
+class CleanupTaskTests(TestCase):
+    def test_deletes_vectors_by_prefix_and_files(self):
+        from unittest.mock import patch, MagicMock
+        from accounts.tasks import cleanup_document_data
+
+        index = MagicMock()
+        index.list.return_value = iter([["d1#a", "d1#b"]])
+
+        with patch("accounts.tasks.get_pinecone_index", return_value=index), \
+             patch("accounts.tasks.default_storage") as storage:
+            storage.exists.return_value = True
+            cleanup_document_data(["d1"], ["uploads/a.txt"])
+
+        index.list.assert_called_once_with(prefix="d1#")
+        index.delete.assert_called_once_with(ids=["d1#a", "d1#b"])
+        storage.delete.assert_called_once_with("uploads/a.txt")
+
+    def test_survives_pinecone_errors(self):
+        from unittest.mock import patch, MagicMock
+        from accounts.tasks import cleanup_document_data
+
+        index = MagicMock()
+        index.list.side_effect = RuntimeError("boom")
+        with patch("accounts.tasks.get_pinecone_index", return_value=index), \
+             patch("accounts.tasks.default_storage") as storage:
+            storage.exists.return_value = False
+            # Should not raise
+            cleanup_document_data(["d1"], [])
+
+
+def patch_cleanup():
+    from unittest.mock import patch
+    return patch("accounts.views.cleanup_document_data")
+
+
+class ChapterQuestionListTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="q@b.com", password="pw12345", name="Q")
+        self.client.force_authenticate(self.user)
+
+    def test_lists_saved_questions_for_chapter(self):
+        from accounts.models import Chapter, GenerateQuestion
+        chapter = Chapter.objects.create(user=self.user, name="Ch")
+        GenerateQuestion.objects.create(
+            chapter=chapter, question_text="Q1?", answer_text="A1")
+        GenerateQuestion.objects.create(
+            chapter=chapter, question_text="Q2?", answer_text="A2")
+
+        res = self.client.get(f"/auth/chapters/{chapter.id}/questions/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(len(res.data), 2)
+        self.assertEqual(
+            {q["question_text"] for q in res.data}, {"Q1?", "Q2?"})
+
+    def test_cannot_list_foreign_chapter_questions(self):
+        from accounts.models import Chapter, GenerateQuestion
+        other = User.objects.create_user(
+            email="o2@b.com", password="pw12345", name="O")
+        chapter = Chapter.objects.create(user=other, name="Ch")
+        GenerateQuestion.objects.create(
+            chapter=chapter, question_text="secret?", answer_text="a")
+
+        res = self.client.get(f"/auth/chapters/{chapter.id}/questions/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(len(res.data), 0)
+
+
 class RagChatResponseShapeTests(TestCase):
     def setUp(self):
         self.client = APIClient()
