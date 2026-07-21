@@ -337,8 +337,12 @@ def process_document_ingestion(self, document_id: str):
                 if doc.chapter:
                     metadata["chapter_id"] = str(doc.chapter.id)
 
+                # Prefix the point id with the document id so a document's
+                # vectors can be located later via list-by-prefix. This is the
+                # only way to delete vectors on a Pinecone serverless index,
+                # which does not support delete-by-metadata-filter.
                 points.append({
-                    "id": str(uuid.uuid4()),
+                    "id": f"{document_id}#{uuid.uuid4()}",
                     "values": vector,
                     "metadata": metadata,
                 })
@@ -384,3 +388,43 @@ def process_document_ingestion(self, document_id: str):
             {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
         )
         raise self.retry(exc=e)
+
+
+@shared_task
+def cleanup_document_data(document_ids, file_names):
+    """Best-effort cleanup of a deleted chapter/subject's residual data.
+
+    Removes each document's Pinecone vectors (located by the ``<doc_id>#`` id
+    prefix set at ingestion) and its file from storage. Runs after the DB rows
+    are already gone, so failures here are logged but never surface to the user.
+    """
+    document_ids = document_ids or []
+    file_names = file_names or []
+
+    if document_ids:
+        try:
+            index = get_pinecone_index()
+        except Exception as e:
+            logger.error(f"cleanup_document_data: cannot reach Pinecone: {e}")
+            index = None
+
+        if index is not None:
+            for document_id in document_ids:
+                try:
+                    for id_page in index.list(prefix=f"{document_id}#"):
+                        if id_page:
+                            index.delete(ids=id_page)
+                except Exception as e:
+                    logger.error(
+                        f"cleanup_document_data: failed to delete vectors for "
+                        f"document {document_id}: {e}"
+                    )
+
+    for name in file_names:
+        if not name:
+            continue
+        try:
+            if default_storage.exists(name):
+                default_storage.delete(name)
+        except Exception as e:
+            logger.error(f"cleanup_document_data: failed to delete file {name}: {e}")

@@ -16,7 +16,7 @@ import os
 
 
 
-from .tasks import  create_chapter_from_document, process_document_for_existing_chapter, process_document_ingestion
+from .tasks import  create_chapter_from_document, process_document_for_existing_chapter, process_document_ingestion, cleanup_document_data
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
@@ -136,6 +136,19 @@ class SubjectListCreateView(generics.ListCreateAPIView):
 
         return Response(subjects_data)
 
+def _purge_documents(documents_qs):
+    """Fully remove a set of documents: enqueue vector + file cleanup, then
+    delete the DB rows. Used by chapter/subject cascade deletes so documents are
+    truly removed rather than left detached by the ``SET_NULL`` default."""
+    documents = list(documents_qs)
+    if not documents:
+        return
+    document_ids = [str(doc.id) for doc in documents]
+    file_names = [doc.file.name for doc in documents if doc.file]
+    cleanup_document_data.delay(document_ids, file_names)
+    documents_qs.delete()
+
+
 class SubjectDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
     lookup_field = 'id'
@@ -147,6 +160,13 @@ class SubjectDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Subject.objects.filter(user=self.request.user)
+
+    def perform_destroy(self, instance):
+        # Full cascade: remove all documents (and their vectors/files) belonging
+        # to this subject's chapters, then delete the subject. Chapters cascade
+        # via the FK; chat sessions detach (SET_NULL) and are intentionally kept.
+        _purge_documents(Document.objects.filter(chapter__subject=instance))
+        instance.delete()
 
 # ------------ documents ------------
 
@@ -286,7 +306,14 @@ class ChapterDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Chapter.objects.filter(user=self.request.user)
-    
+
+    def perform_destroy(self, instance):
+        # Full cascade: remove this chapter's documents (and their vectors/files),
+        # then delete the chapter. Generated questions/flashcards cascade via FK;
+        # chat sessions detach (SET_NULL) and are intentionally kept.
+        _purge_documents(instance.documents.all())
+        instance.delete()
+
 class ChapterMessageListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = ChatMessageSerializer
@@ -705,6 +732,18 @@ class ChapterFlashCardListView(generics.ListAPIView):
             chapter_id=self.kwargs['chapter_id'],
             user=self.request.user,
         )
+
+
+class ChapterQuestionListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = GeneratedQuestionsSerializer
+
+    def get_queryset(self):
+        # GenerateQuestion has no user field; scope ownership through the chapter.
+        return GenerateQuestion.objects.filter(
+            chapter_id=self.kwargs['chapter_id'],
+            chapter__user=self.request.user,
+        ).order_by('created_at')
 
 # class FlashCardListView(generics.ListAPIView):
 #     permission_classes = [IsAuthenticated]
