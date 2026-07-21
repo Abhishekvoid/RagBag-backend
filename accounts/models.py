@@ -135,6 +135,7 @@ class ChatMessage(models.Model):
     text = models.TextField()
     tokens = models.PositiveIntegerField(null=True, blank=True)
     citations = models.JSONField(null=True, blank=True)
+    suggestions = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

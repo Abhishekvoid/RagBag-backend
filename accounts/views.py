@@ -475,24 +475,43 @@ class RAGChatMessageView(APIView):
             ).order_by("-created_at")[:10]
             history = list(reversed(history))
             # Call the high-performance RAG function
-            ai_text_response = async_to_sync(rag_pipeline.run)(
+            result = async_to_sync(rag_pipeline.run)(
                 user_query,
-                chat_history=list(history),          
+                chat_history=list(history),
                 chapter_id=str(chapter_id),
                 user_id=user.id,
             )
+
+            ai_text = result["answer"]
+            sources = result.get("sources", [])
+            followups = result.get("followups", [])
+
+            # Enrich source chips with a human title (sync DB is fine here).
+            doc_ids = [s["document_id"] for s in sources]
+            titles = {
+                str(pk): title
+                for pk, title in Document.objects.filter(
+                    id__in=doc_ids
+                ).values_list("id", "title")
+            }
+            for s in sources:
+                s["title"] = titles.get(s["document_id"], "Source")
 
             # Save the AI's response
             ai_message = ChatMessage.objects.create(
                 session=session,
                 sender='ai',
-                text=ai_text_response
+                text=ai_text,
+                citations=sources,
+                suggestions=followups,
             )
-            
+
             response_data = {
                 "id": str(ai_message.id),
                 "sender": "ai",
-                "text": ai_message.text
+                "text": ai_message.text,
+                "sources": sources,
+                "followups": followups,
             }
             return Response(response_data, status=status.HTTP_201_CREATED)
         

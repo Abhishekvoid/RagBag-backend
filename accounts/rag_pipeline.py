@@ -9,11 +9,8 @@ from dotenv import load_dotenv
 import numpy as np 
 from django.db import transaction
 
-from qdrant_client import models
-from qdrant_client.http.exceptions import UnexpectedResponse
 import json
 
-from .ai_clients import async_qdrant_client  # we’ll still use self.groq_client for LLM
 from .models import Document
 from .tasks import process_document_ingestion
 from utils.formatting import enforce_markdown_spacing
@@ -23,7 +20,7 @@ import uuid
 from utils.llm_gateway import ask_llm, LLMUnavailable
 from .rag_service import (
     embed_texts,
-    search_qdrant_vectors,
+    search_vectors,
     make_chapter_user_filter,
 )
 from utils.reranking_crossencoder import reranker
@@ -36,14 +33,81 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 LLM_MODEL = "llama-3.1-8b-instant"
+ANSWER_MODEL = "llama-3.3-70b-versatile"
 
-QDRANT_COLLECTION_NAME = "studywise_documents"
+TUTOR_SYSTEM_PROMPT = """You are StudyWise, an expert tutor helping a student understand their own study material. Your job is to make the concept click — not to sound like a textbook.
+
+How you answer:
+- Lead with a direct, plain-language answer to exactly what was asked. No preamble.
+- Match length to the question: a single line for simple questions, a few short paragraphs for complex ones. Never pad.
+- Write in natural prose. Use **bold** for key terms, and short `-` bullet lists, only when they genuinely aid clarity — not by default.
+- Define any jargon the first time it appears, in plain words.
+- Be warm and encouraging but precise. Sound like a sharp person explaining to a friend.
+
+Grounding rules:
+- Base your answer primarily on the STUDENT'S MATERIAL provided.
+- You MAY add general knowledge to clarify or complete an explanation, but when you go beyond their material, flag it briefly like: "(Beyond your notes:) ...".
+- If the material doesn't cover something and you're not confident, say so plainly instead of guessing.
+- Never invent specifics (numbers, definitions, names) that are not in the material or well-established general knowledge.
+
+Do not list multiple follow-up questions yourself — those are handled separately. You may end with at most one short invitation to go deeper."""
 
 
+def build_answer_messages(context: str, query: str) -> list:
+    """Two-message chat payload for the answer step: a fixed tutor system
+    prompt plus a user message carrying the retrieved context and question."""
+    user_content = (
+        f"STUDENT'S MATERIAL:\n{context}\n\n"
+        f"QUESTION:\n{query}"
+    )
+    return [
+        {"role": "system", "content": TUTOR_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def parse_followups(raw: str) -> list:
+    """Parse a follow-ups JSON string into up to 3 clean questions. Never raises."""
+    try:
+        data = json.loads(raw)
+        items = data.get("followups", [])
+        if not isinstance(items, list):
+            return []
+        cleaned = [str(x).strip() for x in items if str(x).strip()]
+        return cleaned[:3]
+    except Exception:
+        return []
+
+
+def build_sources(final_results) -> list:
+    """Distinct source chunks (by document_id, top 3) with a short snippet."""
+    seen = set()
+    sources = []
+    for r in final_results:
+        payload = getattr(r, "payload", None) or {}
+        doc_id = payload.get("document_id")
+        if not doc_id or doc_id in seen:
+            continue
+        seen.add(doc_id)
+        sources.append({
+            "document_id": str(doc_id),
+            "snippet": (payload.get("text", "") or "")[:140],
+        })
+        if len(sources) >= 3:
+            break
+    return sources
+
+
+def _result(answer: str, sources=None, followups=None) -> dict:
+    return {
+        "answer": answer,
+        "sources": sources or [],
+        "followups": followups or [],
+    }
 
 
 class RagPipeline:
-    def __init__(self, groq_api_key, qdrant_client, embedding_model):
+    def __init__(self, groq_api_key, embedding_model):
         self.api_key = groq_api_key
 
         if not self.api_key:
@@ -58,7 +122,6 @@ class RagPipeline:
 
         from groq import AsyncGroq
         self.groq_client = AsyncGroq(api_key=self.api_key)
-        self.qdrant_client = qdrant_client
         self.embedding_model = embedding_model
         self.LLM_model = LLM_MODEL
 
@@ -96,8 +159,8 @@ class RagPipeline:
         try:
 
             if self.is_greeting(user_query):
-                return await self.handle_greeting(user_query)
-            
+                return _result(await self.handle_greeting(user_query))
+
             refined_query = await self.contextualize_query(user_query, chat_history, request_id, user_id, chapter_id)
             logger.info(f"Refined query: {refined_query}")
 
@@ -107,9 +170,9 @@ class RagPipeline:
 
             # step 3: Execute strategy
             if intent == "summary":
-                result =  await self.handle_summary(chapter_id, user_id)
+                result =  _result(await self.handle_summary(chapter_id, user_id))
             elif intent == "ambiguous":
-                result =  "I'm not sure I understand. Could you clarify your question about this document?"
+                result =  _result("I'm not sure I understand. Could you clarify your question about this document?")
             else:
                 result = await self.handle_rag_search(refined_query, chapter_id, user_id, request_id)
             
@@ -331,6 +394,31 @@ class RagPipeline:
             )       
         return result     
 
+    async def _generate_followups(self, query: str, answer: str) -> list:
+        """Cheap 8B call: 2-3 next questions a student might ask. []-safe."""
+        prompt = (
+            "You suggest what a student might naturally ask NEXT. "
+            "Given their question and the tutor's answer, return 2-3 short, "
+            "specific follow-up questions that build on this answer and deepen "
+            "understanding. Phrase them in the student's voice, under 12 words "
+            'each. Return ONLY JSON: {"followups": ["...", "..."]}\n\n'
+            f"QUESTION: {query}\n\nANSWER: {answer}"
+        )
+        try:
+            resp = await ask_llm(
+                self.groq_client,
+                messages=[{"role": "user", "content": prompt}],
+                model=LLM_MODEL,
+                json_mode=True,
+                temperature=0.5,
+                max_tokens=200,
+                timeout=15.0,
+            )
+            return parse_followups(resp.choices[0].message.content)
+        except Exception as e:
+            logger.warning(f"Follow-up generation failed: {e}")
+            return []
+
     async def handle_greeting(self, query):
         return (
             "Hello! I'm your study assistant. I'm ready to help you analyze this chapter. "
@@ -442,63 +530,31 @@ class RagPipeline:
         # # ===== Also check what's actually stored in Qdrant =====
         # logger.info("Checking what's in Qdrant for this chapter...")
 
-        try:
-            # Scroll through some vectors to see what chapter_ids exist
-            scroll_result = await async_qdrant_client.scroll(
-                collection_name=QDRANT_COLLECTION_NAME,
-                limit=5,
-                with_payload=True,
-                with_vectors=False,
-            )
-            
-            logger.info(f" Sample vectors in collection:")
-            for point in scroll_result[0]:
-                logger.info(f"Stored → chapter_id={point.payload.get('chapter_id')}, user_id={point.payload.get('user_id')}")
-                logger.info(f"Text preview: {point.payload.get('text', '')[:100]}")
-            
-            logger.info(f"FILTER DEBUG → user_id={user_id}, chapter_id={chapter_id}")
-        except Exception as e:
-            logger.error(f"Scroll check failed: {e}")
+        logger.info(f"FILTER DEBUG → user_id={user_id}, chapter_id={chapter_id}")
 
-        
-        search_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="user_id",
-                    match=models.MatchValue(value=str(user_id))
-                ),
-                models.FieldCondition(
-                        key="chapter_id",
-                        match=models.MatchValue(value=str(chapter_id)),
-                ),
-            ]
-        )
+        search_filter = {
+            "user_id": {"$eq": str(user_id)},
+            "chapter_id": {"$eq": str(chapter_id)},
+        }
 
         logger.info("🔍 Searching vector database...")
         try: 
             async with latency_tracker.track_async("vector_search"):
-                flat_results = await search_qdrant_vectors(
-                    all_embeddings, 
-                    filter=search_filter, 
+                flat_results = await search_vectors(
+                    all_embeddings,
+                    filter=search_filter,
                     limit_per_vector=15  # Get more results for reranking
                 )
-                logger.info(f" Retrieved {len(flat_results)} results from Qdrant")
+                logger.info(f" Retrieved {len(flat_results)} results from Pinecone")
 
             if not flat_results:
                 logger.warning("Strict filter failed → fallback to user_id only")
 
-                fallback_filter = models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=str(user_id))
-                        )
-                    ]
-                )
-                flat_results = await search_qdrant_vectors(
+                fallback_filter = {"user_id": {"$eq": str(user_id)}}
+                flat_results = await search_vectors(
                     all_embeddings,
                     filter=fallback_filter,
-                    limit_per_vector=15        
+                    limit_per_vector=15
                 )
 
 
@@ -524,11 +580,11 @@ class RagPipeline:
                 else:
                     logger.error("❌ First result has no payload!")
             else:
-                logger.error("❌ NO RESULTS returned from Qdrant search!")
-                return "I couldn't find relevant information in your document. This might be a technical issue."
+                logger.error("❌ NO RESULTS returned from vector search!")
+                return _result("I couldn't find relevant information in your document. This might be a technical issue.")
         except Exception as e:
-            logger.error(f"❌ Qdrant search failed: {e}", exc_info=True)
-            return "Search failed. Please try again."
+            logger.error(f"❌ Vector search failed: {e}", exc_info=True)
+            return _result("Search failed. Please try again.")
             
 
         # reranking 
@@ -590,83 +646,44 @@ class RagPipeline:
         
         if context_length < 100:
             logger.error(f"❌ Context too short: {context_length} chars")
-            return "I found very limited information in your document. Please ensure it uploaded correctly."
+            return _result("I found very limited information in your document. Please ensure it uploaded correctly.")
     
         logger.info(f"📄 Context built: {len(context)} chars from {len(final_results)} chunks")
 
         # ===== STEP 6: GENERATE ANSWER =====
         logger.info("🤖 Generating answer...")
-        
-        final_prompt = f"""You are an expert AI tutor helping a student understand their study material. Provide a clear, accurate, and helpful response.
 
-            **MANDATORY FORMATTING RULES (Follow exactly):**
-            1. **Always** start with a 1-sentence direct answer in bold.
-            2. Use **one blank line** between every paragraph/section.
-            3. Every paragraph = MAX 2 sentences (40 words).
-            4. Use `-` bullets for ANY list (steps, factors, examples).
-            5. **Bold key terms** on first mention only.
-            6. End technical explanations with `**In simple terms:** ...`
+        answer_messages = build_answer_messages(context, query)
 
-            **YOUR APPROACH:**
-            1. Answer the question directly and concisely
-            2. Ground every claim in the context provided below
-            3. Use natural, conversational language
-            4. Structure your response for easy scanning (bold, bullets, etc.)
-            5. If the context doesn't contain the answer, be honest about it
-
-            **FORMATTING:**
-            - Use **bold** for key terms and important concepts
-            - Use bullet points for lists or multiple items
-            - Keep paragraphs short (2-3 sentences)
-            - Add one blank line between sections
-            - For technical terms, explain them clearly
-
-            **CITATION:**
-            When referencing the material, use phrases like:
-            - "According to the material..."
-            - "The document explains that..."
-            - "As covered in [topic]..."
-
-            **IF INFORMATION IS MISSING:**
-            If the context doesn't contain enough information:
-            "I don't see information about [topic] in your document. The material I have covers [related topics]. Would you like to know about those instead?"
-
-            ---
-
-            **CONTEXT FROM DOCUMENT:**
-            {context}
-
-            **STUDENT'S QUESTION:**
-            {query}
-
-            **YOUR RESPONSE:**
-            """
-       
         try:
             async with latency_tracker.track_async("llm_generation"):
                 chat_completion = await ask_llm(
                     self.groq_client,
-                    messages=[{"role": "user", "content": final_prompt}],
-                    model=LLM_MODEL,
-                    temperature=0.1,  # Very low temperature for factual accuracy
-                    max_tokens=800,
-                    timeout=30.0,
+                    messages=answer_messages,
+                    model=ANSWER_MODEL,
+                    temperature=0.4,      # natural prose, not robotic
+                    max_tokens=1500,      # room for adaptive length
+                    timeout=45.0,
                 )
 
             raw_output = chat_completion.choices[0].message.content
             logger.info(f"✅ Generated response ({len(raw_output)} chars)")
             logger.info(f"📄 Response preview: {raw_output[:200]}...")
-            
+
             formatted_output = enforce_markdown_spacing(raw_output)
-            return formatted_output
-        
+
+            sources = build_sources(final_results)
+            followups = await self._generate_followups(query, formatted_output)
+
+            return _result(formatted_output, sources=sources, followups=followups)
+
         except LLMUnavailable:
             logger.warning("Answer generation skipped — LLM unavailable")
-            return "AI is temporarily unavailable. Please try again shortly."
-        
+            return _result("AI is temporarily unavailable. Please try again shortly.")
+
         except Exception as e:
             logger.error(f"❌ Answer generation failed: {e}", exc_info=True)
-            return "Failed to generate an answer. Please try again."
+            return _result("Failed to generate an answer. Please try again.")
         
        
 
