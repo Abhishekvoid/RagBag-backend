@@ -26,7 +26,9 @@ class NotificationConsumer(AsyncWebsocketConsumer):
 
     
     async def send_notification(self, event):
-        message = event["message"]
-        
-        
-        await self.send(text_data=json.dumps({"message": message}))
+        # New structured events carry a full "data" dict; forward verbatim.
+        if "data" in event:
+            await self.send(text_data=json.dumps(event["data"]))
+            return
+        # Back-compat: legacy events only carry a "message" string.
+        await self.send(text_data=json.dumps({"message": event["message"]}))
