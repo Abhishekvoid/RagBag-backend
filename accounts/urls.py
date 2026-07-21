@@ -11,6 +11,7 @@ from .views import (
     ChapterMessageListView,
     DocumentListCreateView,
     DocumentDetailView,
+    DocumentRetryView,
     RAGChatMessageView,
     OAuthSignInView,
     GenerateQuestionsView,
@@ -40,6 +41,7 @@ urlpatterns = [
     # Document endpoints
     path('documents/', DocumentListCreateView.as_view(), name='documents-list-create'),
     path('documents/<uuid:id>/', DocumentDetailView.as_view(), name='document-detail'),
+    path('documents/<uuid:id>/retry/', DocumentRetryView.as_view(), name='document-retry'),
 
 
     path('rag-chat/', RAGChatMessageView.as_view(), name='rag-chat'),

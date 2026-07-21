@@ -1,7 +1,6 @@
 import asyncio
 from asgiref.sync import async_to_sync
-from qdrant_client.http.exceptions import UnexpectedResponse
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics, permissions
@@ -17,7 +16,7 @@ import os
 
 
 
-from .tasks import  create_chapter_from_document, process_document_for_existing_chapter
+from .tasks import  create_chapter_from_document, process_document_for_existing_chapter, process_document_ingestion
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
@@ -26,17 +25,12 @@ import json
 logger = logging.getLogger(__name__)
 
 from .rag_pipeline import RagPipeline
-from .ai_clients import qdrant_client, GROQ_API_KEY, groq_client
+from .ai_clients import GROQ_API_KEY, groq_client
 
 rag_pipeline = RagPipeline(
     groq_api_key=GROQ_API_KEY,
-    qdrant_client=qdrant_client,
     embedding_model="gemini-embedding-001",
 )
-
-QDRANT_URL = os.getenv("QDRANT_URL") #  "http://localhost:6333"
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-QDRANT_COLLECTION_NAME = "studywise_documents"
 
 LLM_MODEL = "llama-3.1-8b-instant"
 
@@ -230,6 +224,24 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Document.objects.filter(user=self.request.user)
+
+
+class DocumentRetryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, id):
+        doc = get_object_or_404(Document, id=id, user=request.user)
+        doc.status = Document.STATUS_PENDING
+        doc.error_message = None
+        doc.save(update_fields=["status", "error_message"])
+        if doc.chapter:
+            process_document_ingestion.delay(str(doc.id))
+        else:
+            create_chapter_from_document.delay(str(doc.id))
+        return Response(
+            {"status": "requeued", "document_id": str(doc.id)},
+            status=status.HTTP_202_ACCEPTED,
+        )
                 
 
 
