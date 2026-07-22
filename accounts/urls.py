@@ -20,6 +20,13 @@ from .views import (
     ChapterFlashCardListView,
     ChapterQuestionListView,
     MeView,
+    DocumentContentView,
+    NoteListCreateView,
+    NoteDetailView,
+    ChapterScratchView,
+    ExplainPassageView,
+    NotesToFlashCardsView,
+    SynthesizeNotesView,
 )
 
 urlpatterns = [
@@ -43,6 +50,7 @@ urlpatterns = [
     path('documents/', DocumentListCreateView.as_view(), name='documents-list-create'),
     path('documents/<uuid:id>/', DocumentDetailView.as_view(), name='document-detail'),
     path('documents/<uuid:id>/retry/', DocumentRetryView.as_view(), name='document-retry'),
+    path('documents/<uuid:id>/content/', DocumentContentView.as_view(), name='document-content'),
 
 
     path('rag-chat/', RAGChatMessageView.as_view(), name='rag-chat'),
@@ -56,6 +64,14 @@ urlpatterns = [
     path('chapters/<uuid:chapter_id>/generate-flashcards/', GenerateFlashCardView.as_view(), name='generate-flashcards'),
     path('chapters/<uuid:chapter_id>/flashcards/', ChapterFlashCardListView.as_view(), name='chapter-flashcards-list'),
     path('flashcards/<uuid:id>/', FlashCardDetailView.as_view(), name='flashcards-detail'),
+
+    # Co-reading workspace: notes + smart actions
+    path('chapters/<uuid:chapter_id>/notes/', NoteListCreateView.as_view(), name='chapter-notes-list-create'),
+    path('notes/<uuid:id>/', NoteDetailView.as_view(), name='note-detail'),
+    path('chapters/<uuid:chapter_id>/scratch/', ChapterScratchView.as_view(), name='chapter-scratch'),
+    path('chapters/<uuid:chapter_id>/explain/', ExplainPassageView.as_view(), name='chapter-explain'),
+    path('chapters/<uuid:chapter_id>/notes-to-flashcards/', NotesToFlashCardsView.as_view(), name='chapter-notes-to-flashcards'),
+    path('chapters/<uuid:chapter_id>/synthesize-notes/', SynthesizeNotesView.as_view(), name='chapter-synthesize-notes'),
 
 ]
 

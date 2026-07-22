@@ -6,12 +6,13 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer,GeneratedFlashCardsSerializer, MeSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer,GeneratedFlashCardsSerializer, MeSerializer, NoteSerializer
 import logging, time
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
-from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards
+from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards, Note
+from utils.circuit_breaker import llm_circuit_breaker
 import os
 
 
@@ -33,6 +34,44 @@ rag_pipeline = RagPipeline(
 )
 
 LLM_MODEL = "llama-3.1-8b-instant"
+
+
+class AIRateThrottle(UserRateThrottle):
+    """Tighter, dedicated bucket for the AI note actions (explain / synthesize /
+    notes->flashcards). Rate configured under DEFAULT_THROTTLE_RATES['ai']."""
+    scope = 'ai'
+
+
+class LLMUnavailable(Exception):
+    """Raised by the sync Groq helpers when the circuit breaker is open or the
+    client is unconfigured; views translate this to a 503."""
+
+
+def _guarded_groq(messages, *, json_mode):
+    """Sync Groq call wrapped in the shared circuit breaker (mirrors the async
+    llm_gateway used by the RAG pipeline, but for these sync HTTP views)."""
+    if groq_client is None:
+        raise LLMUnavailable("LLM client is not configured.")
+    if not llm_circuit_breaker.allow_request():
+        raise LLMUnavailable("LLM is temporarily unavailable. Please retry shortly.")
+    try:
+        kwargs = {"messages": messages, "model": LLM_MODEL}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        completion = groq_client.chat.completions.create(**kwargs)
+        llm_circuit_breaker.record_success()
+        return completion.choices[0].message.content
+    except Exception:
+        llm_circuit_breaker.record_failure()
+        raise
+
+
+def groq_json(prompt):
+    return json.loads(_guarded_groq([{"role": "user", "content": prompt}], json_mode=True))
+
+
+def groq_text(prompt):
+    return _guarded_groq([{"role": "user", "content": prompt}], json_mode=False)
 
 
 class RegisterAPIView(APIView):
@@ -744,6 +783,219 @@ class ChapterQuestionListView(generics.ListAPIView):
             chapter_id=self.kwargs['chapter_id'],
             chapter__user=self.request.user,
         ).order_by('created_at')
+
+
+# ------------- co-reading: document content -------------
+
+class DocumentContentView(APIView):
+    """Serve a document's extracted reader text. The list/detail document
+    serializers deliberately omit the (large) body; this is the only place the
+    frontend fetches it. Cleanup/reflow happens client-side."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        doc = get_object_or_404(Document, id=id, user=request.user)
+        if doc.status != Document.STATUS_COMPLETED:
+            return Response(
+                {"error": "Document is not ready.", "status": doc.status},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response({
+            "id": str(doc.id),
+            "title": doc.title,
+            "text": doc.extracted_text or "",
+        })
+
+
+# ------------- co-reading: notes CRUD -------------
+
+class NoteListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = NoteSerializer
+
+    def get_queryset(self):
+        return Note.objects.filter(
+            user=self.request.user,
+            chapter_id=self.kwargs['chapter_id'],
+        )
+
+    def perform_create(self, serializer):
+        chapter = get_object_or_404(Chapter, id=self.kwargs['chapter_id'], user=self.request.user)
+        serializer.save(user=self.request.user, chapter=chapter)
+
+
+class NoteDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = NoteSerializer
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Note.objects.filter(user=self.request.user)
+
+
+class ChapterScratchView(APIView):
+    """The single freeform scratch pad per chapter (one kind=scratch Note),
+    get-or-created on first access."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_or_create(self, request, chapter_id):
+        chapter = get_object_or_404(Chapter, id=chapter_id, user=request.user)
+        note, _ = Note.objects.get_or_create(
+            user=request.user,
+            chapter=chapter,
+            kind=Note.KIND_SCRATCH,
+            defaults={'body': ''},
+        )
+        return note
+
+    def get(self, request, chapter_id):
+        note = self._get_or_create(request, chapter_id)
+        return Response(NoteSerializer(note, context={'request': request}).data)
+
+    def put(self, request, chapter_id):
+        note = self._get_or_create(request, chapter_id)
+        note.body = request.data.get('body', '')
+        note.save(update_fields=['body', 'updated_at'])
+        return Response(NoteSerializer(note, context={'request': request}).data)
+
+
+# ------------- co-reading: smart AI actions -------------
+
+class ExplainPassageView(APIView):
+    """Explain a selected passage and persist the result as a kind=ai note
+    anchored to that passage."""
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [AIRateThrottle]
+
+    def post(self, request, chapter_id, *args, **kwargs):
+        chapter = get_object_or_404(Chapter, id=chapter_id, user=request.user)
+        passage = (request.data.get("passage") or "").strip()
+        if not passage:
+            return Response({"error": "A passage is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        document = None
+        document_id = request.data.get("document")
+        if document_id:
+            document = get_object_or_404(Document, id=document_id, user=request.user)
+
+        prompt = (
+            "You are a patient tutor. Explain the following passage clearly and "
+            "concisely for a student, in 2-4 sentences. Use plain language; do not "
+            "add information beyond what the passage supports.\n\nPASSAGE:\n"
+            f"{passage[:4000]}\n\nEXPLANATION:"
+        )
+        try:
+            explanation = groq_text(prompt).strip()
+        except LLMUnavailable as e:
+            return Response({"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            logger.error(f"Explain failed for chapter {chapter_id}: {e}", exc_info=True)
+            return Response({"error": "Failed to explain passage."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        note = Note.objects.create(
+            user=request.user,
+            chapter=chapter,
+            document=document,
+            kind=Note.KIND_AI,
+            anchor_start=request.data.get("anchor_start"),
+            anchor_end=request.data.get("anchor_end"),
+            quoted_text=passage,
+            body=explanation,
+        )
+        return Response(NoteSerializer(note, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class NotesToFlashCardsView(APIView):
+    """Turn selected notes/highlights into flashcards in ONE batched LLM call,
+    reusing the GenerateFlashCards store."""
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [AIRateThrottle]
+
+    def post(self, request, chapter_id, *args, **kwargs):
+        chapter = get_object_or_404(Chapter, id=chapter_id, user=request.user)
+        note_ids = request.data.get("note_ids") or []
+
+        notes = Note.objects.filter(user=request.user, chapter=chapter).exclude(kind=Note.KIND_SCRATCH)
+        if note_ids:
+            notes = notes.filter(id__in=note_ids)
+        notes = list(notes)
+        if not notes:
+            return Response({"error": "No notes to convert."}, status=status.HTTP_400_BAD_REQUEST)
+
+        source = "\n\n---\n\n".join(
+            "\n".join(filter(None, [n.quoted_text.strip(), n.body.strip()])) for n in notes
+        )
+        prompt = (
+            "You are an elite educator. From the student's highlights and notes "
+            "below, generate high-quality recall flashcards.\n\n"
+            f"NOTES:\n{source[:8000]}\n\n"
+            'Return a valid JSON object with a single key "flashcards": an array of '
+            'objects each with "flashcard_front" (a question/prompt) and '
+            '"flashcard_back" (a 2-3 sentence answer). Output only JSON.'
+        )
+        try:
+            data = groq_json(prompt)
+        except LLMUnavailable as e:
+            return Response({"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            logger.error(f"Notes->flashcards failed for chapter {chapter_id}: {e}", exc_info=True)
+            return Response({"error": "Failed to generate flashcards."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        cards = data.get("flashcards", [])
+        if not isinstance(cards, list):
+            return Response({"error": "Unexpected AI response format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_flashcards = []
+        for item in cards:
+            if isinstance(item, dict) and "flashcard_front" in item and "flashcard_back" in item:
+                new_flashcards.append(GenerateFlashCards.objects.create(
+                    chapter=chapter,
+                    user=request.user,
+                    flashcard_front=item["flashcard_front"],
+                    flashcard_back=item["flashcard_back"],
+                ))
+        if not new_flashcards:
+            return Response({"error": "AI returned no usable flashcards."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            GeneratedFlashCardsSerializer(new_flashcards, many=True).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SynthesizeNotesView(APIView):
+    """Synthesize all of a chapter's highlights/notes into a markdown study
+    sheet in one LLM call. Returns the summary (frontend may save it as a note)."""
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [AIRateThrottle]
+
+    def post(self, request, chapter_id, *args, **kwargs):
+        chapter = get_object_or_404(Chapter, id=chapter_id, user=request.user)
+        notes = list(
+            Note.objects.filter(user=request.user, chapter=chapter).exclude(kind=Note.KIND_SCRATCH)
+        )
+        if not notes:
+            return Response({"error": "No notes to synthesize yet."}, status=status.HTTP_400_BAD_REQUEST)
+
+        source = "\n\n---\n\n".join(
+            "\n".join(filter(None, [n.quoted_text.strip(), n.body.strip()])) for n in notes
+        )
+        prompt = (
+            "You are a study coach. Synthesize the student's highlights and notes "
+            "below into a concise, well-structured study sheet in markdown. Use "
+            "short headings and bullet points; group related ideas; do not invent "
+            "facts beyond the notes.\n\n"
+            f"NOTES:\n{source[:8000]}\n\nSTUDY SHEET (markdown):"
+        )
+        try:
+            summary = groq_text(prompt).strip()
+        except LLMUnavailable as e:
+            return Response({"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            logger.error(f"Synthesize failed for chapter {chapter_id}: {e}", exc_info=True)
+            return Response({"error": "Failed to synthesize notes."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"summary": summary}, status=status.HTTP_200_OK)
 
 # class FlashCardListView(generics.ListAPIView):
 #     permission_classes = [IsAuthenticated]
