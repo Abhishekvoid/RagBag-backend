@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 LLM_MODEL = "llama-3.1-8b-instant"
 EMBEDDING_MODEL = "gemini-embedding-001"
-QDRANT_COLLECTION_NAME = "studywise_documents"
 
 RETRYABLE_ERRORS = (
 

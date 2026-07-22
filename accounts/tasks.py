@@ -5,15 +5,19 @@ import io
 from celery import shared_task
 from django.conf import settings
 from django.core.files.storage import default_storage
-from qdrant_client import QdrantClient, models
 
 import PyPDF2
 import docx
 from pptx import Presentation
 from dotenv import load_dotenv
-from qdrant_client.models import PointStruct,  VectorParams, Distance
 from groq import Groq
 from .models import Document, Chapter
+from .ai_clients import get_pinecone_index
+from .realtime import (
+    push_ingestion_status,
+    PHASE_READING, PHASE_NAMING, PHASE_CHUNKING,
+    PHASE_EMBEDDING, PHASE_STORING, PHASE_READY, PHASE_FAILED,
+)
 
 
 import pytesseract
@@ -31,29 +35,29 @@ BATCH_SIZE = 100
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-QDRANT_URL = getattr(settings, "QDRANT_URL")  #  "http://localhost:6333"
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-LLM_MODEL = "llama-3.1-8b-instant" 
-QDRANT_COLLECTION_NAME = "studywise_documents"
+LLM_MODEL = "llama-3.1-8b-instant"
 TOKENIZER_NAME = "cl100k_base"
 MAX_CHUNKS_PER_DOCUMENT = 1000
 
-_qdrant_client = None
 _tokenizer = None
 _groq_client = None
 
 def _get_clients():
-    global _qdrant_client, _tokenizer, _groq_client
-    if _qdrant_client is None:
-        _qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    """Return (pinecone_index, tokenizer, groq_client).
+
+    The Pinecone index is created lazily on first use and shared across the
+    worker process.
+    """
+    global _tokenizer, _groq_client
+    pinecone_index = get_pinecone_index()
     if _tokenizer is None:
         _tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
     if _groq_client is None:
         if not GROQ_API_KEY:
             raise ValueError("GROQ_API_KEY is not set.")
         _groq_client = Groq(api_key=GROQ_API_KEY)
-    return _qdrant_client, _tokenizer, _groq_client
+    return pinecone_index, _tokenizer, _groq_client
 
 
 
@@ -140,6 +144,7 @@ def create_chapter_from_document(self, document_id: str):
         # --- NEW: Set status to PROCESSING immediately ---
         doc.status = Document.STATUS_PROCESSING
         doc.save(update_fields=['status'])
+        push_ingestion_status(doc.user.id, doc.id, PHASE_READING)
 
         _, _, groq_client = _get_clients()
         
@@ -178,6 +183,10 @@ def create_chapter_from_document(self, document_id: str):
         doc.title = ai_generated_title
         doc.save()
         logger.info(f"[{document_id}] Document updated with new chapter and title.")
+        push_ingestion_status(
+            doc.user.id, doc.id, PHASE_NAMING,
+            chapter_id=new_chapter.id, title=ai_generated_title,
+        )
 
         # --- NEW: Send a success notification ---
         channel_layer = get_channel_layer()
@@ -202,7 +211,9 @@ def create_chapter_from_document(self, document_id: str):
             doc.status = Document.STATUS_FAILED
             doc.error_message = str(e)
             doc.save(update_fields=['status', 'error_message'])
-        except:
+            push_ingestion_status(
+                doc.user.id, doc.id, PHASE_FAILED, error=str(e))
+        except Exception:
             pass # If doc doesn't exist, we can't update it
 
         # You can optionally send a failure notification here
@@ -251,7 +262,7 @@ def process_document_ingestion(self, document_id: str):
     doc = Document.objects.get(id=document_id)
     
     try:
-        qdrant_client, tokenizer, _ = _get_clients()
+        vector_index, tokenizer, _ = _get_clients()
         
         if not doc.extracted_text:
             logger.info(f"[{document_id}] Extracting text for ingestion...")
@@ -273,43 +284,17 @@ def process_document_ingestion(self, document_id: str):
 
         BATCH = 16
 
+        total_batches = max(1, (len(text_chunks) + BATCH - 1) // BATCH)
+        push_ingestion_status(doc.user.id, doc.id, PHASE_CHUNKING,
+                              total_batches=total_batches)
+
         MIN_CHUNK_LEN = 10
         MAX_CHUNK_LEN = 800
 
-        try:
-            qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
-            logger.info("Collection exists")
+        # Pinecone serverless indexes are created lazily by get_pinecone_index()
+        # and index all metadata fields automatically — no collection/payload-index
+        # setup needed here.
 
-        except Exception:
-            logger.info("Collection not found. Creating collection...")
-
-            qdrant_client.create_collection(
-                collection_name=QDRANT_COLLECTION_NAME,
-                vectors_config=models.VectorParams(
-                    size=384,
-                    distance=models.Distance.COSINE
-                )
-            )
-
-        # ✅ ALWAYS CREATE INDEX (CRITICAL FIX)
-        try:
-            qdrant_client.create_payload_index(
-                collection_name=QDRANT_COLLECTION_NAME,
-                field_name="chapter_id",
-                field_schema=models.PayloadSchemaType.KEYWORD
-            )
-
-            qdrant_client.create_payload_index(
-                collection_name=QDRANT_COLLECTION_NAME,
-                field_name="user_id",
-                field_schema=models.PayloadSchemaType.KEYWORD
-            )
-
-            logger.info("Indexes ensured for chapter_id and user_id")
-
-        except Exception as e:
-            logger.warning(f"Index creation skipped (likely exists): {e}")
-        
         all_inserted = 0
         for i in range(0, len(text_chunks), BATCH):
             
@@ -324,8 +309,12 @@ def process_document_ingestion(self, document_id: str):
             chunk_batch = [c[:MAX_CHUNK_LEN] for c in chunk_batch]
             
             logger.info(f"[{correlation_id}] Embedding batch {i//BATCH + 1}/{(len(text_chunks)-1)//BATCH + 1} ({len(chunk_batch)} chunks)")
+            push_ingestion_status(
+                doc.user.id, doc.id, PHASE_EMBEDDING,
+                batch=i // BATCH + 1, total_batches=total_batches,
+            )
 
-            
+
             try:
                 embeddings = async_to_sync(tei_client.embed_texts)(chunk_batch)
             except Exception as e:
@@ -335,39 +324,47 @@ def process_document_ingestion(self, document_id: str):
 
             logger.info(f"Embedding batch {i//BATCH + 1} ({len(chunk_batch)} chunks)")
             for chunk, vector in zip(chunk_batch, embeddings):
-                
 
-                
-                payload = {
+                metadata = {
                     "text": chunk,
                     "document_id": str(document_id),
                     "user_id": str(doc.user.id),
                     "file_type": doc.file_type,
                 }
-                
-                payload["chapter_id"] = str(doc.chapter.id) if doc.chapter else None
 
-                points.append(
-                    PointStruct(
-                        id=str(uuid.uuid4()),
-                        vector=vector,
-                        payload=payload
-                    )
-                )
-            qdrant_client.upsert(
-                collection_name=QDRANT_COLLECTION_NAME,
-                points=points,
-                wait=True
-            )
+                # Pinecone metadata cannot contain null values, so only set
+                # chapter_id when the document actually belongs to a chapter.
+                if doc.chapter:
+                    metadata["chapter_id"] = str(doc.chapter.id)
+
+                # Prefix the point id with the document id so a document's
+                # vectors can be located later via list-by-prefix. This is the
+                # only way to delete vectors on a Pinecone serverless index,
+                # which does not support delete-by-metadata-filter.
+                points.append({
+                    "id": f"{document_id}#{uuid.uuid4()}",
+                    "values": vector,
+                    "metadata": metadata,
+                })
+
+            all_inserted += len(points)
+            vector_index.upsert(vectors=points)
             
         
             
+        push_ingestion_status(doc.user.id, doc.id, PHASE_STORING)
+
         # --- NEW: On success, mark as COMPLETED ---
         doc.status = Document.STATUS_COMPLETED
         doc.error_message = None  # Clear any previous errors
         doc.save(update_fields=['status', 'error_message'])
-        
+
         logger.info(f"[{document_id}] Ingestion successful.")
+        push_ingestion_status(
+            doc.user.id, doc.id, PHASE_READY,
+            chapter_id=(doc.chapter.id if doc.chapter else None),
+            title=(doc.chapter.name if doc.chapter else doc.title),
+        )
 
         # --- NEW: Send a success notification ---
         channel_layer = get_channel_layer()
@@ -382,7 +379,8 @@ def process_document_ingestion(self, document_id: str):
         doc.status = Document.STATUS_FAILED
         doc.error_message = str(e)
         doc.save(update_fields=['status', 'error_message'])
-        
+        push_ingestion_status(doc.user.id, doc.id, PHASE_FAILED, error=str(e))
+
         # --- NEW: Send a failure notification ---
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
@@ -390,3 +388,43 @@ def process_document_ingestion(self, document_id: str):
             {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
         )
         raise self.retry(exc=e)
+
+
+@shared_task
+def cleanup_document_data(document_ids, file_names):
+    """Best-effort cleanup of a deleted chapter/subject's residual data.
+
+    Removes each document's Pinecone vectors (located by the ``<doc_id>#`` id
+    prefix set at ingestion) and its file from storage. Runs after the DB rows
+    are already gone, so failures here are logged but never surface to the user.
+    """
+    document_ids = document_ids or []
+    file_names = file_names or []
+
+    if document_ids:
+        try:
+            index = get_pinecone_index()
+        except Exception as e:
+            logger.error(f"cleanup_document_data: cannot reach Pinecone: {e}")
+            index = None
+
+        if index is not None:
+            for document_id in document_ids:
+                try:
+                    for id_page in index.list(prefix=f"{document_id}#"):
+                        if id_page:
+                            index.delete(ids=id_page)
+                except Exception as e:
+                    logger.error(
+                        f"cleanup_document_data: failed to delete vectors for "
+                        f"document {document_id}: {e}"
+                    )
+
+    for name in file_names:
+        if not name:
+            continue
+        try:
+            if default_storage.exists(name):
+                default_storage.delete(name)
+        except Exception as e:
+            logger.error(f"cleanup_document_data: failed to delete file {name}: {e}")

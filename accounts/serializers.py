@@ -1,7 +1,7 @@
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards
+from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards, Note
 User = get_user_model()
 import logging
 
@@ -189,8 +189,8 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model =  ChatMessage
 
-        fields = ['id', 'session', 'sender', 'text', 'created_at', 'citations', 'tokens', 'error']
-        read_only_fields = ['id', 'created_at', 'citations', 'tokens', 'error']
+        fields = ['id', 'session', 'sender', 'text', 'created_at', 'citations', 'tokens', 'error', 'suggestions']
+        read_only_fields = ['id', 'created_at', 'citations', 'tokens', 'error', 'suggestions']
 
 
 class RAGChatMessageSerializer(serializers.Serializer):
@@ -207,8 +207,40 @@ class GeneratedQuestionsSerializer(serializers.ModelSerializer):
 
 
 class GeneratedFlashCardsSerializer(serializers.ModelSerializer):
-    
+
     class Meta:
         model = GenerateFlashCards
         fields = ['id', 'chapter', 'flashcard_front', 'flashcard_back', 'known', 'need_review', 'created_at']
+
+
+# ------------ co-reading notes
+
+class NoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Note
+        fields = [
+            'id', 'chapter', 'document', 'kind', 'anchor_start', 'anchor_end',
+            'quoted_text', 'body', 'color', 'created_at', 'updated_at',
+        ]
+        # chapter comes from the URL and is injected in the view.
+        read_only_fields = ('id', 'chapter', 'created_at', 'updated_at')
+
+    def validate_kind(self, kind):
+        # The single freeform scratch pad is managed exclusively by
+        # ChapterScratchView (one get-or-created row per chapter). Allowing it
+        # through the generic create/update endpoint would let a client make a
+        # second scratch Note, which then breaks that view's get_or_create with
+        # MultipleObjectsReturned.
+        if kind == Note.KIND_SCRATCH:
+            raise serializers.ValidationError(
+                "Scratch notes are managed via the chapter scratch endpoint."
+            )
+        return kind
+
+    def validate_document(self, document):
+        # `document` is a declared FK, so DRF resolves the UUID into a Document.
+        # Enforce ownership, mirroring DocumentSerializer.validate_chapter.
+        if document is not None and document.user_id != self.context['request'].user.id:
+            raise serializers.ValidationError("Document not found or does not belong to user.")
+        return document
         

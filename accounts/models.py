@@ -135,6 +135,7 @@ class ChatMessage(models.Model):
     text = models.TextField()
     tokens = models.PositiveIntegerField(null=True, blank=True)
     citations = models.JSONField(null=True, blank=True)
+    suggestions = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -171,3 +172,52 @@ class GenerateFlashCards(models.Model):
 
     def __str__(self):
         return f"flashcard for chapter{self.chapter.name} (User: {self.user.email})"
+
+
+# --------------- Co-reading notes
+
+class Note(models.Model):
+    """A note or highlight in the co-reading workspace.
+
+    Highlight/note/ai/chat notes anchor to a character range in a document's
+    cleaned reader text (``anchor_start``/``anchor_end`` into that text, with
+    ``quoted_text`` kept as a fuzzy-match fallback). A ``scratch`` note is the
+    single freeform pad per chapter and has no document/anchor.
+    """
+
+    KIND_HIGHLIGHT = 'highlight'   # bare highlight, no body
+    KIND_NOTE = 'note'             # user-written note on a passage
+    KIND_AI = 'ai'                 # AI-generated (Explain / synthesis)
+    KIND_CHAT = 'chat'             # a chat answer saved as a note
+    KIND_SCRATCH = 'scratch'       # the one freeform pad per chapter
+
+    KIND_CHOICES = [
+        (KIND_HIGHLIGHT, 'Highlight'),
+        (KIND_NOTE, 'Note'),
+        (KIND_AI, 'AI'),
+        (KIND_CHAT, 'Chat'),
+        (KIND_SCRATCH, 'Scratch'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notes')
+    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='notes')
+    # CASCADE + nullable: deleting a document removes its anchored notes; a
+    # scratch note has no document.
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='notes', null=True, blank=True)
+
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_NOTE)
+    anchor_start = models.PositiveIntegerField(null=True, blank=True)
+    anchor_end = models.PositiveIntegerField(null=True, blank=True)
+    quoted_text = models.TextField(blank=True)
+    body = models.TextField(blank=True)
+    color = models.CharField(max_length=20, default='vermillion')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['document_id', 'anchor_start', 'created_at']
+
+    def __str__(self):
+        return f"{self.kind} note ({self.user.email}) — {self.quoted_text[:30] or self.body[:30]}"
