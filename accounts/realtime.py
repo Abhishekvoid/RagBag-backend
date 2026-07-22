@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 PHASE_READING = "reading"
 PHASE_NAMING = "naming"
+PHASE_PAGE = "page"
 PHASE_CHUNKING = "chunking"
 PHASE_EMBEDDING = "embedding"
 PHASE_STORING = "storing"
@@ -20,7 +21,8 @@ PHASE_FAILED = "failed"
 
 
 def build_ingestion_status(document_id, phase, *, chapter_id=None, title=None,
-                           batch=None, total_batches=None, error=None) -> dict:
+                           batch=None, total_batches=None, page=None,
+                           total_pages=None, error=None) -> dict:
     """Pure builder for an ingestion_status payload. Optional keys are
     omitted when None so the frontend reducer can treat missing == unchanged."""
     payload = {
@@ -36,6 +38,10 @@ def build_ingestion_status(document_id, phase, *, chapter_id=None, title=None,
         payload["batch"] = batch
     if total_batches is not None:
         payload["total_batches"] = total_batches
+    if page is not None:
+        payload["page"] = page
+    if total_pages is not None:
+        payload["total_pages"] = total_pages
     if error is not None:
         payload["error"] = error
     return payload

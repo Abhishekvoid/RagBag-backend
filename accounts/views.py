@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer,GeneratedFlashCardsSerializer, MeSerializer, NoteSerializer
+from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer,GeneratedFlashCardsSerializer, MeSerializer, NoteSerializer, DocumentPageSerializer
 import logging, time
 from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
@@ -17,7 +17,7 @@ import os
 
 
 
-from .tasks import  create_chapter_from_document, process_document_for_existing_chapter, process_document_ingestion, cleanup_document_data
+from .tasks import  create_chapter_from_document, process_document_for_existing_chapter, process_document_ingestion, cleanup_document_data, rescan_document_with_vision
 from rest_framework import parsers
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny 
@@ -1007,3 +1007,19 @@ class SynthesizeNotesView(APIView):
 #             session__chapter_id = chapter_id,
 #             session__user=self.request.user
 #         ).order_by('created_at')
+
+class DocumentPagesView(generics.ListAPIView):
+    """GET /auth/documents/<id>/pages/ — the reconstructed pages of an owned document."""
+    serializer_class = DocumentPageSerializer
+
+    def get_queryset(self):
+        doc = get_object_or_404(Document, id=self.kwargs["id"], user=self.request.user)
+        return doc.pages.all()
+
+
+class DocumentRescanView(APIView):
+    """POST /auth/documents/<id>/rescan/ — re-run the vision pipeline for an owned document."""
+    def post(self, request, id):
+        doc = get_object_or_404(Document, id=id, user=request.user)
+        rescan_document_with_vision.delay(str(doc.id))
+        return Response({"status": "queued"}, status=status.HTTP_202_ACCEPTED)

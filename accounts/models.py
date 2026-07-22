@@ -114,6 +114,40 @@ class Document(models.Model):
         return f"{self.title} ({self.file_type})"
 
 
+class DocumentPage(models.Model):
+    """One page of a document's canonical, reader-facing text.
+
+    ``reconstructed_md`` is the clean markdown shown in the reader and used for
+    RAG/flashcards/questions. ``image_url`` is the rendered original page, kept
+    as a verification layer for the AI's ``[?word]`` uncertainty markers.
+    """
+
+    SOURCE_LAYER = 'layer'       # born-digital: used the PDF's own text layer
+    SOURCE_VISION = 'vision'     # reconstructed by the vision model
+    SOURCE_FALLBACK = 'fallback' # vision unavailable/failed: tesseract or raw layer
+    SOURCE_CHOICES = [
+        (SOURCE_LAYER, 'Text layer'),
+        (SOURCE_VISION, 'Vision'),
+        (SOURCE_FALLBACK, 'Fallback'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='pages')
+    page_number = models.PositiveIntegerField()          # 1-indexed
+    image_url = models.TextField(blank=True)             # S3 url of the rendered original page
+    reconstructed_md = models.TextField(blank=True)
+    text_source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_LAYER)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('document', 'page_number')
+        ordering = ['page_number']
+
+    def __str__(self):
+        return f"{self.document_id} p.{self.page_number} ({self.text_source})"
+
+
 class ChatSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(CustomUserModel, on_delete=models.CASCADE, related_name='chat_sessions')

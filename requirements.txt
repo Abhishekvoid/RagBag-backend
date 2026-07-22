@@ -140,3 +140,4 @@ xlsxwriter==3.2.5
 zope.event==5.1.1
 zope.interface==7.2
 httpx
+pymupdf

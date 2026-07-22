@@ -1,7 +1,7 @@
 from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards, Note
+from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards, Note, DocumentPage
 User = get_user_model()
 import logging
 
@@ -125,6 +125,12 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     #     return document
 # ------------ chapter -----------------
+
+class DocumentPageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentPage
+        fields = ["page_number", "image_url", "reconstructed_md", "text_source"]
+
 
 class ChapterWriteSerializer(serializers.ModelSerializer):
     class Meta:

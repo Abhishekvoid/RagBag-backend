@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from .models import Document, Chapter
 from .ai_clients import get_pinecone_index
+from .page_pipeline import build_document_pages, canonical_text_for_document
 from .realtime import (
     push_ingestion_status,
     PHASE_READING, PHASE_NAMING, PHASE_CHUNKING,
@@ -133,6 +134,41 @@ def chunk_text_by_token(text, tokenizer, chunk_size=200, chunk_overlap=50):
         start += chunk_size - chunk_overlap
     return chunks
 
+def extract_document_text(doc):
+    """PDF -> page pipeline (vision/layer canonical text); other types -> legacy extractor."""
+    if doc.file_type == "pdf":
+        build_document_pages(doc)
+        return canonical_text_for_document(doc)
+    return get_text_from_file(doc.file.name, doc.file_type)
+
+
+def build_chunk_metadata(document, chunk, page_number=None):
+    metadata = {
+        "text": chunk,
+        "document_id": str(document.id),
+        "user_id": str(document.user_id),
+        "file_type": document.file_type,
+    }
+    if document.chapter_id:
+        metadata["chapter_id"] = str(document.chapter_id)
+    if page_number is not None:
+        metadata["page_number"] = page_number
+    return metadata
+
+
+def _page_for_chunk(chunk, pages):
+    # ponytail: substring match on the chunk head; approximate (mis-tags repeated
+    # text / boundary-spanning chunks). Fine while the citation UI is deferred —
+    # upgrade to per-page chunking when exact page provenance is needed.
+    head = chunk.strip()[:40]
+    if not head:
+        return None
+    for p in pages:
+        if head in p.reconstructed_md:
+            return p.page_number
+    return None
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def create_chapter_from_document(self, document_id: str):
     logger.info(f"[{document_id}] TASK STARTED: create_chapter_from_document")
@@ -152,11 +188,11 @@ def create_chapter_from_document(self, document_id: str):
         
         if not doc.extracted_text:
             logger.info(f"[{document_id}] Extracting text from file: {doc.file.name}")
-            document_text = get_text_from_file(doc.file.name, doc.file_type)
+            document_text = extract_document_text(doc)
 
             if not document_text:
                 raise ValueError("No text could be extracted from the document.")
-            
+
             doc.extracted_text = document_text
             doc.save(update_fields=["extracted_text"])
         else:
@@ -230,7 +266,7 @@ def process_document_for_existing_chapter(document_id, chapter_id):
 
 
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Extracting text from file: {document.file.name}")
-        extracted_text = get_text_from_file(document.file.name, document.file_type)
+        extracted_text = extract_document_text(document)
         logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Text extracted. Length: {len(extracted_text)} characters.")
 
         document.extracted_text = extracted_text
@@ -266,7 +302,7 @@ def process_document_ingestion(self, document_id: str):
         
         if not doc.extracted_text:
             logger.info(f"[{document_id}] Extracting text for ingestion...")
-            doc.extracted_text = get_text_from_file(doc.file.name, doc.file_type)
+            doc.extracted_text = extract_document_text(doc)
             doc.save(update_fields=['extracted_text'])
 
         if not doc.extracted_text.strip():
@@ -274,6 +310,7 @@ def process_document_ingestion(self, document_id: str):
 
         
         tei_client = TEIEmbeddingClient()
+        pages = list(doc.pages.all())   # for per-chunk page tagging (may be empty for non-PDF)
         text_chunks = chunk_text_by_token(doc.extracted_text, tokenizer)
         text_chunks = text_chunks[:MAX_CHUNKS_PER_DOCUMENT]
 
@@ -325,17 +362,8 @@ def process_document_ingestion(self, document_id: str):
             logger.info(f"Embedding batch {i//BATCH + 1} ({len(chunk_batch)} chunks)")
             for chunk, vector in zip(chunk_batch, embeddings):
 
-                metadata = {
-                    "text": chunk,
-                    "document_id": str(document_id),
-                    "user_id": str(doc.user.id),
-                    "file_type": doc.file_type,
-                }
-
-                # Pinecone metadata cannot contain null values, so only set
-                # chapter_id when the document actually belongs to a chapter.
-                if doc.chapter:
-                    metadata["chapter_id"] = str(doc.chapter.id)
+                metadata = build_chunk_metadata(
+                    doc, chunk, page_number=_page_for_chunk(chunk, pages))
 
                 # Prefix the point id with the document id so a document's
                 # vectors can be located later via list-by-prefix. This is the
@@ -388,6 +416,19 @@ def process_document_ingestion(self, document_id: str):
             {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
         )
         raise self.retry(exc=e)
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=30)
+def rescan_document_with_vision(self, document_id: str):
+    """Regenerate a document's pages via the vision pipeline and re-embed.
+    Existing highlights re-anchor via quoted_text after the text changes."""
+    doc = Document.objects.get(id=document_id)
+    doc.status = Document.STATUS_PROCESSING
+    doc.save(update_fields=["status"])
+    doc.pages.all().delete()
+    doc.extracted_text = extract_document_text(doc)
+    doc.save(update_fields=["extracted_text"])
+    process_document_ingestion.delay(str(doc.id))
 
 
 @shared_task
