@@ -225,6 +225,18 @@ class NoteSerializer(serializers.ModelSerializer):
         # chapter comes from the URL and is injected in the view.
         read_only_fields = ('id', 'chapter', 'created_at', 'updated_at')
 
+    def validate_kind(self, kind):
+        # The single freeform scratch pad is managed exclusively by
+        # ChapterScratchView (one get-or-created row per chapter). Allowing it
+        # through the generic create/update endpoint would let a client make a
+        # second scratch Note, which then breaks that view's get_or_create with
+        # MultipleObjectsReturned.
+        if kind == Note.KIND_SCRATCH:
+            raise serializers.ValidationError(
+                "Scratch notes are managed via the chapter scratch endpoint."
+            )
+        return kind
+
     def validate_document(self, document):
         # `document` is a declared FK, so DRF resolves the UUID into a Document.
         # Enforce ownership, mirroring DocumentSerializer.validate_chapter.

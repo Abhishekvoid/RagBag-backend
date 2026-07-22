@@ -498,7 +498,7 @@ class RagPipeline:
                 logger.info(f"✅ Generated {len(all_embeddings)} embeddings")
         except Exception as e:
             logger.error(f"❌ Embedding failed: {e}")
-            return "Failed to process your question. Please try again."
+            return _result("Failed to process your question. Please try again.")
         
         logger.info("🧪 Testing search WITHOUT filter to verify embeddings work...")
 
