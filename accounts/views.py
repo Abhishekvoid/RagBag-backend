@@ -12,7 +12,10 @@ from django.core.exceptions import ValidationError
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards, Note
-from utils.circuit_breaker import llm_circuit_breaker
+from utils.circuit_breaker import llm_circuit_breaker, tei_circuit_breaker
+from utils.metrics.latency import latency_tracker
+from utils.metrics.cost import cost_tracker
+from utils.metrics.retrieval import retrieval_evaluator
 import os
 
 
@@ -126,6 +129,36 @@ class MeView(APIView):
     def get(self, request):
         serializer = MeSerializer(request.user)
         return Response(serializer.data)
+
+
+class MetricsView(APIView):
+    """Staff-only snapshot of the in-process trackers: per-stage latency,
+    per-token spend, retrieval quality, and circuit-breaker state.
+
+    Counters are per worker process and in-memory, so numbers reflect the one
+    process that served this request — fine for a read on a single web dyno,
+    not a substitute for a real metrics backend across many.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        # Redis backs the breakers; if it is down we still want the rest of the
+        # payload, since that is exactly when someone is reading this endpoint.
+        try:
+            breakers = {
+                "llm": "open" if llm_circuit_breaker.is_open() else "closed",
+                "tei_embedding": "open" if tei_circuit_breaker.is_open() else "closed",
+            }
+        except Exception:
+            logger.warning("circuit breaker state unavailable", exc_info=True)
+            breakers = {"error": "unavailable"}
+
+        return Response({
+            "latency_ms_by_stage": latency_tracker.get_metrics(),
+            "cost": cost_tracker.get_summary(),
+            "retrieval": retrieval_evaluator.get_summary(),
+            "circuit_breakers": breakers,
+        })
 
 # ------------ subject --------------
 

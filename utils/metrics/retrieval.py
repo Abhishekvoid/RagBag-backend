@@ -49,4 +49,18 @@ class RetrievalEvaluator:
             }
         }
 
+    def get_summary(self) -> Dict:
+        """Rolled-up retrieval quality since process start (or last reset)."""
+        with self._lock:
+            m = self._metrics
+            total = m.total_queries
+
+        return {
+            "total_queries": total,
+            "exact_hit_rate": round(m.exact_hits / total, 4) if total else 0.0,
+            "relevance_rate": round(m.relevant_hits / total, 4) if total else 0.0,
+            "avg_chunks_retrieved": round(m.avg_chunks_retrieved, 2),
+        }
+
+
 retrieval_evaluator = RetrievalEvaluator()
