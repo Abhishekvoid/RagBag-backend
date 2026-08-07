@@ -1,7 +1,0 @@
-
-celery -A core worker -l info -P solo
-
-python manage.py shell
-
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --reload
