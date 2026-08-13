@@ -14,13 +14,19 @@ class CostTracker:
     up as an explicit gap instead of a silently shrinking bill.
     """
 
-    # USD per token. Groq list prices (verify at groq.com/pricing before
-    # quoting these numbers anywhere they matter).
+    # USD per token. Verify at the provider's pricing page before quoting these
+    # numbers anywhere they matter.
+    #
+    # The OpenRouter entries are priced at a genuine zero (`:free` variants),
+    # which is deliberately different from being absent: absent means "the table
+    # is stale" and routes tokens to the `unpriced` bucket, whereas zero means
+    # "we know this call is free". Drop the `:free` suffix and these numbers
+    # stop being true.
     PRICING = {
-        # Routing / query expansion / follow-ups
-        "llama-3.1-8b-instant": {"input": 0.05 / 1_000_000, "output": 0.08 / 1_000_000},
+        # Routing / query expansion / follow-ups / all JSON-mode calls
+        "nvidia/nemotron-3-super-120b-a12b:free": {"input": 0.0, "output": 0.0},
         # Answer generation
-        "llama-3.3-70b-versatile": {"input": 0.59 / 1_000_000, "output": 0.79 / 1_000_000},
+        "nvidia/nemotron-3-ultra-550b-a55b:free": {"input": 0.0, "output": 0.0},
     }
 
     def __init__(self):

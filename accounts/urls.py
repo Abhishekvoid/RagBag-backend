@@ -15,7 +15,6 @@ from .views import (
     DocumentRescanView,
     DocumentRetryView,
     RAGChatMessageView,
-    OAuthSignInView,
     GenerateQuestionsView,
     GenerateFlashCardView,
     FlashCardDetailView,
@@ -61,7 +60,6 @@ urlpatterns = [
 
     path('rag-chat/', RAGChatMessageView.as_view(), name='rag-chat'),
 
-    path('oauth-signin/', OAuthSignInView.as_view(), name='oauth_signin'),
     
 
     path('chapters/<uuid:chapter_id>/generate-questions/', GenerateQuestionsView.as_view(), name='generate-questions'),

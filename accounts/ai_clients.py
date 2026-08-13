@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import logging
-from groq import Groq, AsyncGroq
+from openai import OpenAI, AsyncOpenAI
 from pinecone import Pinecone, ServerlessSpec
 
 load_dotenv()
@@ -18,7 +18,24 @@ def _clean_env(name: str):
     return v
 
 
-GROQ_API_KEY = _clean_env("GROQ_API_KEY")
+OPENROUTER_API_KEY = _clean_env("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = _clean_env("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+
+# OpenRouter is the sole LLM provider.
+#
+# Model choice is deliberate and verified against the live OpenRouter catalog:
+#   ANSWER_MODEL  Nemotron 3 Ultra (550B) — best prose quality, 1M context, but it
+#                 does NOT support response_format. Asking it for JSON mode returns
+#                 HTTP 200 with content=None, so it is used for prose answers only.
+#   LLM_MODEL     Nemotron 3 Super (120B) — declares AND honours response_format
+#                 plus structured outputs, with ~3x less reasoning overhead than
+#                 Ultra. Used for routing, query expansion and every JSON call.
+#
+# Both are reasoning models: they spend completion tokens on hidden reasoning
+# before emitting content, which is why max_tokens budgets downstream are larger
+# than they were for the old Groq llama models.
+ANSWER_MODEL = _clean_env("OPENROUTER_ANSWER_MODEL") or "nvidia/nemotron-3-ultra-550b-a55b:free"
+LLM_MODEL = _clean_env("OPENROUTER_LLM_MODEL") or "nvidia/nemotron-3-super-120b-a12b:free"
 
 PINECONE_API_KEY = _clean_env("PINECONE_API_KEY")
 PINECONE_INDEX = _clean_env("PINECONE_INDEX") or "studywise-documents"
@@ -27,10 +44,10 @@ PINECONE_REGION = _clean_env("PINECONE_REGION") or "us-east-1"
 EMBEDDING_DIM = int(_clean_env("EMBEDDING_DIM") or 384)
 
 
-if GROQ_API_KEY:
-    logger.info("GROQ_API_KEY loaded (masked): %s...%s", GROQ_API_KEY[:4], GROQ_API_KEY[-4:])
+if OPENROUTER_API_KEY:
+    logger.info("OPENROUTER_API_KEY loaded")
 else:
-    logger.warning("GROQ_API_KEY not found")
+    logger.warning("OPENROUTER_API_KEY not found — no LLM provider configured")
 
 
 # Pinecone client is cheap to construct and does no network I/O until used.
@@ -68,5 +85,16 @@ def get_pinecone_index():
     return _index
 
 
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-async_groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# OpenRouter speaks the OpenAI wire protocol, so the stock OpenAI SDK (already a
+# dependency, used by vision_ocr) is all that is needed — no extra package.
+#
+# The rest of the app codes against llm_client / async_llm_client rather than
+# these names, so swapping providers stays a one-file change.
+llm_client = (
+    OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+    if OPENROUTER_API_KEY else None
+)
+async_llm_client = (
+    AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+    if OPENROUTER_API_KEY else None
+)

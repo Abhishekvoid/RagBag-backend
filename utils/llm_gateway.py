@@ -11,7 +11,7 @@ class LLMUnavailable(Exception):
     pass
 
 
-async def ask_llm(groq_client, messages, *, model, json_mode=False, **kwargs):
+async def ask_llm(client, messages, *, model, json_mode=False, **kwargs):
 
     # circuit breaker gate
     if llm_circuit_breaker.is_open():
@@ -22,7 +22,7 @@ async def ask_llm(groq_client, messages, *, model, json_mode=False, **kwargs):
         async with llm_slot_manager.slot():
 
             response = await _call_llm_with_retry(
-                groq_client,
+                client,
                 messages=messages,
                 model=model,
                 json_mode=json_mode,

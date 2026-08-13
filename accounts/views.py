@@ -29,14 +29,11 @@ import json
 logger = logging.getLogger(__name__)
 
 from .rag_pipeline import RagPipeline
-from .ai_clients import GROQ_API_KEY, groq_client
+from .ai_clients import LLM_MODEL, llm_client
 
 rag_pipeline = RagPipeline(
-    groq_api_key=GROQ_API_KEY,
     embedding_model="gemini-embedding-001",
 )
-
-LLM_MODEL = "llama-3.1-8b-instant"
 
 
 class AIRateThrottle(UserRateThrottle):
@@ -46,35 +43,51 @@ class AIRateThrottle(UserRateThrottle):
 
 
 class LLMUnavailable(Exception):
-    """Raised by the sync Groq helpers when the circuit breaker is open or the
+    """Raised by the sync LLM helpers when the circuit breaker is open or the
     client is unconfigured; views translate this to a 503."""
 
 
-def _guarded_groq(messages, *, json_mode):
-    """Sync Groq call wrapped in the shared circuit breaker (mirrors the async
+def _invoke_sync(client, messages, *, model, json_mode):
+    """One sync provider call. Returns content, or raises if it is empty.
+
+    An OpenRouter model without response_format support answers a JSON-mode
+    request with a 200 whose content is None, so an explicit check keeps that
+    from reaching json.loads() as a confusing TypeError.
+    """
+    kwargs = {"messages": messages, "model": model}
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+    completion = client.chat.completions.create(**kwargs)
+    content = completion.choices[0].message.content
+    if content is None:
+        raise LLMUnavailable(f"{model} returned an empty completion")
+    return content
+
+
+def _guarded_llm(messages, *, json_mode):
+    """Sync LLM call wrapped in the shared circuit breaker (mirrors the async
     llm_gateway used by the RAG pipeline, but for these sync HTTP views)."""
-    if groq_client is None:
+    if llm_client is None:
         raise LLMUnavailable("LLM client is not configured.")
     if not llm_circuit_breaker.allow_request():
         raise LLMUnavailable("LLM is temporarily unavailable. Please retry shortly.")
+
     try:
-        kwargs = {"messages": messages, "model": LLM_MODEL}
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        completion = groq_client.chat.completions.create(**kwargs)
+        content = _invoke_sync(llm_client, messages,
+                               model=LLM_MODEL, json_mode=json_mode)
         llm_circuit_breaker.record_success()
-        return completion.choices[0].message.content
+        return content
     except Exception:
         llm_circuit_breaker.record_failure()
         raise
 
 
-def groq_json(prompt):
-    return json.loads(_guarded_groq([{"role": "user", "content": prompt}], json_mode=True))
+def llm_json(prompt):
+    return json.loads(_guarded_llm([{"role": "user", "content": prompt}], json_mode=True))
 
 
-def groq_text(prompt):
-    return _guarded_groq([{"role": "user", "content": prompt}], json_mode=False)
+def llm_text(prompt):
+    return _guarded_llm([{"role": "user", "content": prompt}], json_mode=False)
 
 
 class RegisterAPIView(APIView):
@@ -405,46 +418,6 @@ class ChapterMessageListView(generics.ListAPIView):
 
 # -------------------- auth ---------------- 
 
-class OAuthSignInView(APIView):
-    permission_classes = [AllowAny]
-
-    def post (self,request, *args, **kwargs):
-        email =  request.data.get("email")
-        name = request.data.get("name")
-
-        if not email or not name:
-            return Response(
-                {"error": "Email and name are required."},
-                status= status.HTTP_400_BAD_REQUEST
-            )
-        
-        User =  get_user_model()
-
-        user, created = User.objects.get_or_create(
-            email=email,
-            defaults={'name': name}
-        )
-
-        if created:
-            
-            user.set_unusable_password()
-            user.save()
-
-        refresh = RefreshToken.for_user(user)
-
-        return Response({
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'name' : user.name,
-            },
-            'tokens': {
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-            }
-        }, status=status.HTTP_200_OK)
-        
-
 # ---------  chatmessage -------    --------
 # class ChatMessageView(APIView):
 #     permission_classes = [IsAuthenticated]
@@ -650,16 +623,8 @@ class GenerateQuestionsView(APIView):
             JSON:
             """
             
-            # 4. Call the AI
-            chat_completion = groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=LLM_MODEL,
-               
-                response_format={"type": "json_object"},
-            )
-            
-          
-            generated_data = json.loads(chat_completion.choices[0].message.content)
+            # 4. Call the AI (breaker-guarded)
+            generated_data = llm_json(prompt)
             
            
             GenerateQuestion.objects.filter(chapter=chapter).delete()
@@ -743,13 +708,7 @@ class GenerateFlashCardView(APIView):
             ⚠️ Do not include commentary or markdown. Output only JSON.
             """
 
-            chat_completion = groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=LLM_MODEL,
-                response_format={"type": "json_object"},
-            )
-
-            generate_data = json.loads(chat_completion.choices[0].message.content)
+            generate_data = llm_json(prompt)
             flashcard_list = generate_data.get("flashcards", [])
 
             if not isinstance(flashcard_list, list):
@@ -918,7 +877,7 @@ class ExplainPassageView(APIView):
             f"{passage[:4000]}\n\nEXPLANATION:"
         )
         try:
-            explanation = groq_text(prompt).strip()
+            explanation = llm_text(prompt).strip()
         except LLMUnavailable as e:
             return Response({"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         except Exception as e:
@@ -967,7 +926,7 @@ class NotesToFlashCardsView(APIView):
             '"flashcard_back" (a 2-3 sentence answer). Output only JSON.'
         )
         try:
-            data = groq_json(prompt)
+            data = llm_json(prompt)
         except LLMUnavailable as e:
             return Response({"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         except Exception as e:
@@ -1021,7 +980,7 @@ class SynthesizeNotesView(APIView):
             f"NOTES:\n{source[:8000]}\n\nSTUDY SHEET (markdown):"
         )
         try:
-            summary = groq_text(prompt).strip()
+            summary = llm_text(prompt).strip()
         except LLMUnavailable as e:
             return Response({"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         except Exception as e:

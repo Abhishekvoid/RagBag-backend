@@ -1,5 +1,6 @@
 from rest_framework.test import APITestCase
 
+from accounts.ai_clients import ANSWER_MODEL, LLM_MODEL
 from accounts.models import CustomUserModel
 from utils.metrics.cost import CostTracker
 
@@ -29,13 +30,20 @@ class MetricsEndpointTest(APITestCase):
 
 
 class CostTrackerTest(APITestCase):
-    def test_answer_model_is_priced(self):
-        """Regression: llama-3.3-70b-versatile was missing from PRICING, so
-        every answer call was booked at $0.00."""
+    def test_models_in_use_are_priced(self):
+        """Regression: the answer model was once missing from PRICING, so every
+        answer call was booked at $0.00 — indistinguishable from a free model.
+
+        Both live models are currently free tiers, so the meaningful assertion
+        is `priced` (the table knows them) rather than a non-zero cost. If the
+        models are ever switched to paid variants, the ids change and this test
+        fails until PRICING is updated — which is the point.
+        """
         t = CostTracker()
-        out = t.track("llama-3.3-70b-versatile", input_tokens=1_000_000, output_tokens=1_000_000)
-        self.assertTrue(out["priced"])
-        self.assertAlmostEqual(out["cost_usd"], 0.59 + 0.79, places=4)
+        for model in (ANSWER_MODEL, LLM_MODEL):
+            out = t.track(model, input_tokens=1_000_000, output_tokens=1_000_000)
+            self.assertTrue(out["priced"], f"{model} missing from PRICING")
+            self.assertEqual(out["cost_usd"], 0.0)
 
     def test_unknown_model_is_flagged_not_zero_billed(self):
         t = CostTracker()
@@ -44,9 +52,14 @@ class CostTrackerTest(APITestCase):
         self.assertEqual(t.get_summary()["unpriced_tokens_by_model"], {"some-new-model": 150})
 
     def test_summary_divides_by_requests_not_tokens(self):
+        # Uses a synthetic priced model: the real models are free, and a $0
+        # table cannot tell "divided by requests" from "divided by tokens".
         t = CostTracker()
+        t.PRICING = dict(t.PRICING)
+        t.PRICING["test-priced-model"] = {"input": 0.05 / 1_000_000,
+                                          "output": 0.08 / 1_000_000}
         for _ in range(4):
-            t.track("llama-3.1-8b-instant", input_tokens=1000, output_tokens=500)
+            t.track("test-priced-model", input_tokens=1000, output_tokens=500)
         s = t.get_summary()
         # 4 calls x (1000 in @ $0.05/M + 500 out @ $0.08/M) = $0.00036
         per_call = 1000 * 0.05 / 1_000_000 + 500 * 0.08 / 1_000_000

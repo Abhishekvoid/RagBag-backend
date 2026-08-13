@@ -32,8 +32,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-LLM_MODEL = "llama-3.1-8b-instant"
-ANSWER_MODEL = "llama-3.3-70b-versatile"
+from .ai_clients import ANSWER_MODEL, LLM_MODEL  # noqa: F401  (re-exported)
 
 TUTOR_SYSTEM_PROMPT = """You are StudyWise, an expert tutor helping a student understand their own study material. Your job is to make the concept click — not to sound like a textbook.
 
@@ -107,21 +106,22 @@ def _result(answer: str, sources=None, followups=None) -> dict:
 
 
 class RagPipeline:
-    def __init__(self, groq_api_key, embedding_model):
-        self.api_key = groq_api_key
+    def __init__(self, embedding_model, api_key=None):
+        # The shared client encodes the provider choice; constructing a second
+        # one here would bypass the retry / empty-completion wiring in
+        # utils.llm_wrapper.
+        from .ai_clients import async_llm_client
 
-        if not self.api_key:
-            self.api_key = getattr(settings, "GROQ_API_KEY", None) or os.getenv("GROQ_API_KEY")
+        self.llm_client = async_llm_client
 
-        if not self.api_key:
-            logger.error("RagPipeline initialized without GROQ_API_KEY")
-            raise ValueError("GROQ_API_KEY is required for RagPipeline. Please check your .env file.")
+        if self.llm_client is None:
+            logger.error("RagPipeline initialized with no LLM provider configured")
+            raise ValueError(
+                "No LLM provider configured. Set OPENROUTER_API_KEY in your .env file."
+            )
 
-        masked_key = f"{self.api_key[:4]}...{self.api_key[-4:]}"
-        logger.info(f"RagPipeline initialized with GROQ_API_KEY: {masked_key}")
+        logger.info("RagPipeline initialized (answer=%s, routing=%s)", ANSWER_MODEL, LLM_MODEL)
 
-        from groq import AsyncGroq
-        self.groq_client = AsyncGroq(api_key=self.api_key)
         self.embedding_model = embedding_model
         self.LLM_model = LLM_MODEL
 
@@ -253,7 +253,7 @@ class RagPipeline:
 
                 try:
                     completion = await ask_llm(
-                        self.groq_client,
+                        self.llm_client,
                         messages=[{"role": "user", "content": prompt}],
                         model=LLM_MODEL,
                         temperature=0.1,
@@ -341,7 +341,7 @@ class RagPipeline:
 
             try:
                 completion = await ask_llm(
-                    self.groq_client,
+                    self.llm_client,
                     messages=[{"role": "user", "content": prompt}],
                     model=LLM_MODEL,
                     temperature=0,
@@ -406,13 +406,17 @@ class RagPipeline:
         )
         try:
             resp = await ask_llm(
-                self.groq_client,
+                self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
                 model=LLM_MODEL,
                 json_mode=True,
                 temperature=0.5,
-                max_tokens=200,
-                timeout=15.0,
+                # Reasoning model: hidden reasoning is billed against max_tokens
+                # before any content is emitted, so the old 200 budget returned
+                # empty completions. Headroom, not extra output — the prompt
+                # still caps the followups at 12 words each.
+                max_tokens=1200,
+                timeout=30.0,
             )
             return parse_followups(resp.choices[0].message.content)
         except Exception as e:
@@ -431,11 +435,11 @@ class RagPipeline:
 
     async def _expand_queries(self, query: str, num: int = 4) -> list[str]:
         """
-        Your old expand_queries_async, but now as a method using self.groq_client.
+        Your old expand_queries_async, but now as a method using self.llm_client.
         """
         expansion_prompt = f"Generate {num} alternative phrasings of the following query for retrieval:\n\n{query}"
         completion = await ask_llm(
-            self.groq_client,
+            self.llm_client,
             model=LLM_MODEL,
             messages=[{"role": "user", "content": expansion_prompt}],
             timeout=5.0,
@@ -471,7 +475,7 @@ class RagPipeline:
         try:
             async with latency_tracker.track_async("query_expansion"):
                 expansion_response = await ask_llm(
-                    self.groq_client,
+                    self.llm_client,
                     messages=[{"role": "user", "content": expansion_prompt}],
                     model=LLM_MODEL,
                     json_mode = True,
@@ -651,11 +655,13 @@ class RagPipeline:
         try:
             async with latency_tracker.track_async("llm_generation"):
                 chat_completion = await ask_llm(
-                    self.groq_client,
+                    self.llm_client,
                     messages=answer_messages,
                     model=ANSWER_MODEL,
                     temperature=0.4,      # natural prose, not robotic
-                    max_tokens=1500,      # room for adaptive length
+                    # room for adaptive length, plus the reasoning tokens Ultra
+                    # spends before it starts writing the answer
+                    max_tokens=4000,
                     timeout=45.0,
                 )
 

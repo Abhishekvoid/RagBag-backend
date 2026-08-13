@@ -42,7 +42,6 @@ INSTALLED_APPS = [
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
-    'allauth.socialaccount.providers.google',
     'rest_framework',
     'rest_framework.authtoken',
     'rest_framework_simplejwt',
@@ -86,15 +85,41 @@ CHANNEL_LAYERS = {
 }
 
 
+# Browser origins allowed to call the API. Base list + anything in the
+# CORS_ALLOWED_ORIGINS env var (comma-separated), so a new frontend URL needs an
+# env change, not a code change.
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://rag-bag-frontend.vercel.app",
-    "https://rag-bag-frontend-gy10fd87x-abhishek-s-projects-060411c6.vercel.app",
-    "https://rag-bag-frontend-51q9neh92-abhishek-s-projects-060411c6.vercel.app",
+]
+CORS_ALLOWED_ORIGINS += [
+    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
 
-
 CORS_ALLOW_CREDENTIALS = True
+
+# Django must trust the HTTPS origins that POST to it (admin login, session
+# endpoints) now that it sits behind a TLS-terminating proxy in production.
+CSRF_TRUSTED_ORIGINS = [o for o in CORS_ALLOWED_ORIGINS if o.startswith("https://")]
+CSRF_TRUSTED_ORIGINS += [
+    o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+
+# Render/Railway/Fly terminate TLS at a proxy and forward plain HTTP with an
+# X-Forwarded-Proto header. Without this, request.is_secure() is always False,
+# which breaks secure cookies and causes SSL-redirect loops.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Hardening that switches on only in production (DEBUG=False). Local dev over
+# http:// is unaffected.
+if not DEBUG:
+    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True") == "True"
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 # ... (REST_FRAMEWORK, CHANNEL_LAYERS, SIMPLE_JWT, etc. are all correct)
 REST_FRAMEWORK = {
@@ -131,22 +156,6 @@ SIMPLE_JWT = {
 
 SITE_ID = 1
 
-SOCIALACCOUNT_PROVIDERS = {
-    'google': {
-        'APP': {
-            'client_id': os.getenv('GOOGLE_OAUTH_CLIENT_ID'),
-            'secret': os.getenv('GOOGLE_OAUTH_CLIENT_SECRET'),
-            'key': ''
-        },
-        'SCOPE': [
-            'profile',
-            'email',
-        ],
-        'AUTH_PARAMS': {
-            'access_type': 'online',
-        }
-    }
-}
 # ---------- Supabase Storage (S3-Compatible) FINAL -----------
 STORAGES = {
     "default": {

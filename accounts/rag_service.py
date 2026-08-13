@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from types import SimpleNamespace
 from typing import List, Union, Optional
-from .ai_clients import async_groq_client, get_pinecone_index
+from .ai_clients import get_pinecone_index
 from utils.tei_embedding import TEIEmbeddingClient
 
 tei_client = TEIEmbeddingClient()

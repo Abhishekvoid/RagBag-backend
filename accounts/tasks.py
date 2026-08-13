@@ -10,9 +10,8 @@ import PyPDF2
 import docx
 from pptx import Presentation
 from dotenv import load_dotenv
-from groq import Groq
 from .models import Document, Chapter
-from .ai_clients import get_pinecone_index
+from .ai_clients import get_pinecone_index, llm_client, LLM_MODEL
 from .page_pipeline import build_document_pages, canonical_text_for_document
 from .realtime import (
     push_ingestion_status,
@@ -36,29 +35,28 @@ BATCH_SIZE = 100
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-GROQ_API_KEY = getattr(settings, "GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-LLM_MODEL = "llama-3.1-8b-instant"
 TOKENIZER_NAME = "cl100k_base"
 MAX_CHUNKS_PER_DOCUMENT = 1000
 
 _tokenizer = None
-_groq_client = None
 
 def _get_clients():
-    """Return (pinecone_index, tokenizer, groq_client).
+    """Return (pinecone_index, tokenizer, llm_client).
 
     The Pinecone index is created lazily on first use and shared across the
-    worker process.
+    worker process. The LLM client is the shared one from ai_clients
+    (OpenRouter primary), so the worker follows the same provider choice as
+    the web process.
     """
-    global _tokenizer, _groq_client
+    global _tokenizer
     pinecone_index = get_pinecone_index()
     if _tokenizer is None:
         _tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
-    if _groq_client is None:
-        if not GROQ_API_KEY:
-            raise ValueError("GROQ_API_KEY is not set.")
-        _groq_client = Groq(api_key=GROQ_API_KEY)
-    return pinecone_index, _tokenizer, _groq_client
+    if llm_client is None:
+        raise ValueError(
+            "No LLM provider configured. Set OPENROUTER_API_KEY."
+        )
+    return pinecone_index, _tokenizer, llm_client
 
 
 
@@ -182,8 +180,8 @@ def create_chapter_from_document(self, document_id: str):
         doc.save(update_fields=['status'])
         push_ingestion_status(doc.user.id, doc.id, PHASE_READING)
 
-        _, _, groq_client = _get_clients()
-        
+        _, _, llm = _get_clients()
+
 
         
         if not doc.extracted_text:
@@ -204,12 +202,18 @@ def create_chapter_from_document(self, document_id: str):
 
         prompt = f"Based on the following text, create a short, descriptive title (4-5 words max) for a new chapter. Do not use quotes.\n\nTEXT:\n{document_text[:4000]}\n\nTITLE:"
         
-        logger.info(f"[{document_id}] Generating chapter title with Groq...")
-        chat_completion = groq_client.chat.completions.create(
+        logger.info(f"[{document_id}] Generating chapter title with {LLM_MODEL}...")
+        chat_completion = llm.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model=LLM_MODEL,
+            # Reasoning model: leave room for hidden reasoning tokens, otherwise
+            # the budget is spent before the 4-5 word title is emitted.
+            max_tokens=1000,
         )
-        ai_generated_title = chat_completion.choices[0].message.content.strip().strip('"')
+        title_content = chat_completion.choices[0].message.content
+        if not title_content:
+            raise ValueError(f"{LLM_MODEL} returned an empty chapter title")
+        ai_generated_title = title_content.strip().strip('"')
         logger.info(f"[{document_id}] Generated title: '{ai_generated_title}'")
 
         new_chapter = Chapter.objects.create(user=doc.user, name=ai_generated_title)
