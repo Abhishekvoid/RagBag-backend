@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 from .rag_pipeline import RagPipeline
 from .ai_clients import LLM_MODEL, llm_client
+from .ws_auth import WS_TICKET_TTL, issue_ticket
 
 rag_pipeline = RagPipeline(
     embedding_model="gemini-embedding-001",
@@ -136,6 +137,23 @@ class RegisterAPIView(APIView):
                 'error': 'Internal server error'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+class WebSocketTicketView(APIView):
+    """Trade an Authorization header for a short-lived socket ticket.
+
+    The browser WebSocket API cannot send headers, so this authenticated HTTPS
+    call is the only place the JWT is presented; the socket URL then carries a
+    disposable ticket instead. See accounts/ws_auth.py.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        return Response(
+            {"ticket": issue_ticket(request.user), "expires_in": WS_TICKET_TTL},
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 

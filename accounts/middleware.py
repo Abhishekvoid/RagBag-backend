@@ -1,32 +1,42 @@
 # in accounts/middleware.py
 
 from urllib.parse import parse_qs
-from django.contrib.auth.models import AnonymousUser
+
 from channels.db import database_sync_to_async
 from channels.middleware import BaseMiddleware
-from rest_framework_simplejwt.tokens import AccessToken
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+
+from .ws_auth import consume_ticket
 
 User = get_user_model()
 
+
 @database_sync_to_async
-def get_user(token_key):
-    try:
-        # Decode the token to get the user ID
-        token = AccessToken(token_key)
-        user_id = token.payload.get('user_id')
-        return User.objects.get(id=user_id)
-    except Exception:
+def get_user_from_ticket(ticket):
+    """Redeem a WebSocket ticket for its user, or AnonymousUser."""
+    user_id = consume_ticket(ticket)
+    if user_id is None:
         return AnonymousUser()
 
-class JWTAuthMiddleware(BaseMiddleware):
+    try:
+        return User.objects.get(pk=user_id)
+    except (User.DoesNotExist, ValueError, TypeError):
+        return AnonymousUser()
+
+
+class TicketAuthMiddleware(BaseMiddleware):
+    """Authenticate a socket from a short-lived ticket in the query string.
+
+    The long-lived JWT is deliberately NOT accepted here — see accounts/ws_auth.py
+    for why a credential in a URL has to be single-use and short-lived.
+    """
+
     async def __call__(self, scope, receive, send):
-        # Get the token from the query string
         query_string = scope.get("query_string", b"").decode("utf-8")
         params = parse_qs(query_string)
-        token = params.get("token", [None])[0]
+        ticket = params.get("ticket", [None])[0]
 
-        # Get the user and attach it to the connection's scope
-        scope['user'] = await get_user(token)
-        
+        scope["user"] = await get_user_from_ticket(ticket)
+
         return await super().__call__(scope, receive, send)

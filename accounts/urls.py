@@ -21,6 +21,7 @@ from .views import (
     ChapterFlashCardListView,
     ChapterQuestionListView,
     MeView,
+    WebSocketTicketView,
     MetricsView,
     DocumentContentView,
     NoteListCreateView,
@@ -34,6 +35,7 @@ from .views import (
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='custom-register'),
     path('me/', MeView.as_view(), name="auth=me"),
+    path('ws-ticket/', WebSocketTicketView.as_view(), name='ws-ticket'),
     path('metrics/', MetricsView.as_view(), name='metrics'),
     path('chatsessions/',ChatSessionView.as_view(), name='chatsessions-list-create' ),
     path('chatsessions/<uuid:id>/',ChatSessionRetriveView.as_view(), name='chatsession-detail'),

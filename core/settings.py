@@ -5,6 +5,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timedelta
 
+from django.core.exceptions import ImproperlyConfigured
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -14,16 +16,47 @@ ASGI_APPLICATION = "core.asgi.application"
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
+# The test runner forces DEBUG=False at runtime, but settings.py is imported
+# before that happens. TESTING lets the production-only "fail loudly" guards
+# below stay strict in real deployments without breaking a bare `manage.py test`
+# in CI, where no .env is present.
+TESTING = "test" in sys.argv
+
+
+def _csv(name, default=""):
+    """Parse a comma-separated env var into a de-duplicated, stripped list."""
+    seen = {}
+    for raw in os.getenv(name, default).split(","):
+        value = raw.strip()
+        if value:
+            seen[value] = None
+    return list(seen)
+
+
+def _require(value, name):
+    """Production config that has no safe default. Fail loudly, never guess.
+
+    Silently falling back to a hardcoded host is how a deployment ends up
+    talking to an abandoned third-party domain.
+    """
+    if not value and not DEBUG and not TESTING:
+        raise ImproperlyConfigured(
+            f"{name} must be set when DEBUG=False. Refusing to start with an "
+            f"implicit default in production."
+        )
+    return value
+
+
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY environment variable is required")
 
 
-ALLOWED_HOSTS = os.getenv(
-    "DJANGO_ALLOWED_HOSTS",
-    "127.0.0.1,localhost,ragbag-backend-production.up.railway.app,rag-bag-frontend-51q9neh92-abhishek-s-projects-060411c6.vercel.app"
-).split(",")
+ALLOWED_HOSTS = _require(_csv("DJANGO_ALLOWED_HOSTS"), "DJANGO_ALLOWED_HOSTS")
+if not ALLOWED_HOSTS:
+    # DEBUG/TESTING only — _require() has already raised in production.
+    ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver"]
 
 # Application definition
 INSTALLED_APPS = [
@@ -70,7 +103,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'core.urls'
 
-REDIS_URL = os.getenv("REDIS_URL","redis://127.0.0.1:6379/0") 
+REDIS_URL = _require(os.getenv("REDIS_URL"), "REDIS_URL") or "redis://127.0.0.1:6379/0"
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
@@ -84,17 +117,40 @@ CHANNEL_LAYERS = {
     },
 }
 
+# DRF throttle counters and WebSocket tickets live in the cache, so it MUST be
+# shared across every web process — a per-process LocMemCache silently turns
+# "100 requests/hour" into "100 per gunicorn worker per deploy" and makes a
+# ticket issued by one worker unusable by another.
+#
+# Same Redis instance as Celery/Channels (no second service), namespaced by
+# KEY_PREFIX so the keyspaces cannot collide.
+if DEBUG or TESTING:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "ragbag-dev",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "KEY_PREFIX": "ragbag",
+        }
+    }
 
-# Browser origins allowed to call the API. Base list + anything in the
-# CORS_ALLOWED_ORIGINS env var (comma-separated), so a new frontend URL needs an
-# env change, not a code change.
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "https://rag-bag-frontend.vercel.app",
-]
-CORS_ALLOWED_ORIGINS += [
-    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
-]
+
+# Browser origins allowed to call the API, from the environment only — a new
+# frontend URL is an env change, not a code change. localhost is added for local
+# development ONLY; production never implicitly trusts a developer's machine,
+# which matters because CORS_ALLOW_CREDENTIALS is on.
+CORS_ALLOWED_ORIGINS = _require(_csv("CORS_ALLOWED_ORIGINS"), "CORS_ALLOWED_ORIGINS")
+if DEBUG or TESTING:
+    # dict.fromkeys preserves order while dropping duplicates.
+    CORS_ALLOWED_ORIGINS = list(
+        dict.fromkeys(CORS_ALLOWED_ORIGINS + ["http://localhost:3000"])
+    )
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -114,6 +170,11 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # http:// is unaffected.
 if not DEBUG:
     SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True") == "True"
+    # Load balancers probe over plain HTTP from inside the VPC. Without this
+    # exemption SecurityMiddleware answers the probe with a 301 and the target
+    # is marked unhealthy — a deploy that fails for a completely unrelated
+    # reason. Only the two probe paths are exempt; everything else redirects.
+    SECURE_REDIRECT_EXEMPT = [r"^ping/?$", r"^healthz/?$"]
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -130,9 +191,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    # JSON only in production. The browsable HTML explorer is a development
+    # convenience that otherwise ships a self-documenting UI for every endpoint
+    # to the public internet.
     'DEFAULT_RENDERER_CLASSES': (
-        'rest_framework.renderers.JSONRenderer',
-        'rest_framework.renderers.BrowsableAPIRenderer',
+        ['rest_framework.renderers.JSONRenderer',
+         'rest_framework.renderers.BrowsableAPIRenderer']
+        if DEBUG else
+        ['rest_framework.renderers.JSONRenderer']
     ),
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
@@ -260,7 +326,25 @@ LOGGING = {
 }
 
 AUTH_USER_MODEL = 'accounts.CustomUserModel'
-# ... (AUTH_PASSWORD_VALIDATORS are correct) ...
+
+# Django applies NO password rules unless this list exists — an absent setting
+# is an empty list, and validate_password() then accepts literally anything,
+# including "1". Djoser's registration serializer calls validate_password(), so
+# populating this list is what actually enforces a policy at signup.
+#
+# min_length 10 rather than Django's default 8: a modest bump that stays well
+# inside NIST 800-63B guidance and does not push users toward writing passwords
+# down. No composition rules (no "must contain a symbol") — those measurably
+# harm usability without improving entropy.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 10},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
