@@ -1,8 +1,41 @@
+# Local development dependencies. The Django app itself runs on the host
+# (`python manage.py runserver`); this file only provides the two inference
+# services it talks to over HTTP.
+#
+# TWO SEPARATE TEI SERVICES — they are not interchangeable:
+#
+#   embedder (8080)  HARD dependency. Every ingestion and every query embeds
+#                    text through it; TEIEmbeddingClient raises
+#                    EmbeddingServiceUnavailable when it is unreachable, with no
+#                    fallback path. Its model MUST produce EMBEDDING_DIM (384)
+#                    vectors or the client rejects the response outright, and
+#                    the Pinecone index is created with that same dimension.
+#
+#   reranker (8081)  SOFT dependency. Improves result ordering; when it is down
+#                    the pipeline falls back to vector + keyword ordering and
+#                    still answers.
+#
+# Different model, different port, different failure semantics — do not copy one
+# service's config onto the other.
+
 services:
-  # Self-hosted cross-encoder reranker via HuggingFace Text Embeddings Inference.
-  # The Django app calls POST http://localhost:8081/rerank (see utils/tei_rerank.py).
-  # Reranking is an enhancement: if this service is down, the RAG pipeline falls
-  # back to vector + keyword ordering and still answers.
+  embedder:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    restart: unless-stopped
+    # bge-small-en-v1.5 emits 384-dimension vectors, matching EMBEDDING_DIM=384
+    # and the Pinecone index. Swapping this model means reindexing everything.
+    command: ["--model-id", "BAAI/bge-small-en-v1.5"]
+    ports:
+      - "8080:80"
+    volumes:
+      - tei_embed_cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s   # first run downloads the model
+
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     restart: unless-stopped
@@ -11,9 +44,16 @@ services:
       - "8081:80"
     volumes:
       - tei_rerank_cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     # Optional: set HF_TOKEN to avoid HuggingFace rate limits on first download.
     # environment:
     #   - HF_TOKEN=${HF_TOKEN}
 
 volumes:
+  tei_embed_cache:
   tei_rerank_cache:

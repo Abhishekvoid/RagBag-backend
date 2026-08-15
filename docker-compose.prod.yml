@@ -1,0 +1,116 @@
+# Production process topology — reference definition, NOT deployed by this phase.
+#
+# Six processes. Postgres (Supabase/RDS), Pinecone and OpenRouter are external
+# managed services and deliberately absent.
+#
+#   caddy      TLS termination + reverse proxy. Fronts web; nothing else is
+#              published. Terminates HTTPS so Django's SECURE_SSL_REDIRECT sees
+#              X-Forwarded-Proto (see SECURE_PROXY_SSL_HEADER in settings.py).
+#   web        ASGI, not WSGI — the app serves WebSockets via Channels.
+#   worker     Celery. Document ingestion runs here; without it uploads queue
+#              forever and never become chapters.
+#   redis      ONE instance serving four roles: Celery broker, Celery result
+#              backend, Channels layer, and the Django cache that backs DRF
+#              throttle counters and WebSocket tickets. Single point of failure
+#              by design at this scale; separate logical DBs if that changes.
+#   embedder   TEI, HARD dependency, 384-dim model. See docker-compose.yml.
+#   reranker   TEI, SOFT dependency.
+#
+# web and worker MUST share REDIS_URL — a ticket issued by web is redeemed by
+# the socket on web, and a task queued by web is consumed by worker. Both read
+# the same env file, which is what guarantees it.
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file: .env
+  environment:
+    # The one setting that must never be inherited from a developer's .env.
+    DEBUG: "False"
+  depends_on:
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  web:
+    <<: *app
+    command: >-
+      sh -c "python manage.py migrate --noinput &&
+             exec gunicorn core.asgi:application
+             -k uvicorn.workers.UvicornWorker
+             --bind 0.0.0.0:8000
+             --workers ${WEB_CONCURRENCY:-2}
+             --timeout 120"
+    expose:
+      - "8000"
+    healthcheck:
+      # Shallow liveness only. /healthz is the deep readiness probe and is not
+      # used here — a Redis blip must not restart a healthy web container.
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/ping/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "core", "worker", "-l", "info", "--concurrency", "2"]
+    healthcheck:
+      test: ["CMD", "celery", "-A", "core", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  embedder:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-small-en-v1.5"]
+    expose:
+      - "80"
+    volumes:
+      - tei_embed_cache:/data
+
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-reranker-base"]
+    expose:
+      - "80"
+    volumes:
+      - tei_rerank_cache:/data
+
+volumes:
+  redis_data:
+  tei_embed_cache:
+  tei_rerank_cache:
+  caddy_data:
+  caddy_config:
