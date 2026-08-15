@@ -4,8 +4,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Environment
+# Environment — deny every .env variant, then re-allow the template.
+# Catch-all so a new file (.env.local, .env.production, .env.staging, …) can
+# never be accidentally tracked; only .env.example is meant to be committed.
 .env
+.env.*
+!.env.example
 
 # Virtual environments
 venv/
