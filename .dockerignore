@@ -1,0 +1,24 @@
+# Keep the build context small and secret-free. Context is ./backend.
+.venv/
+venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Never bake secrets or local-only config into the image.
+.env
+
+# Rebuilt inside the image / not needed at runtime.
+staticfiles/
+media/
+*.sqlite3
+*.log
+hf_cache/
+
+# VCS / tooling noise.
+.git/
+.gitignore
+.pytest_cache/
+.dockerignore
+Dockerfile
