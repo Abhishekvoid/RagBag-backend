@@ -95,6 +95,18 @@ def _tei_health_url(endpoint_url):
 def _check_tei(endpoint_url, name):
     import httpx
 
+    if not endpoint_url:
+        return {"status": "skipped", "reason": "not configured"}
+
+    # A managed provider exposes no /health route, and probing it every few
+    # seconds would bill us for the privilege of a 404. Report it as delegated
+    # rather than degraded — the embedding path is exercised by real traffic.
+    if name == "embed" and getattr(settings, "EMBEDDING_PROVIDER", "tei") != "tei":
+        return {
+            "status": "skipped",
+            "reason": f"managed provider ({settings.EMBEDDING_PROVIDER})",
+        }
+
     health_url = _tei_health_url(endpoint_url)
     if not health_url:
         return {"status": "skipped", "reason": "not configured"}
@@ -115,11 +127,9 @@ HARD_CHECKS = {
 SOFT_CHECKS = {
     "s3": ("_check_s3", ()),
     "celery": ("_check_celery", ()),
-    "tei_embed": ("_check_tei", ("TEI_URL", "http://localhost:8080/embed", "embed")),
-    "tei_rerank": (
-        "_check_tei",
-        ("RERANK_URL", "http://localhost:8081/rerank", "rerank"),
-    ),
+    # Empty default = "not configured" = skipped, never a false degraded.
+    "embedding": ("_check_tei", ("EMBEDDING_URL", "", "embed")),
+    "reranker": ("_check_tei", ("RERANK_URL", "", "rerank")),
 }
 
 

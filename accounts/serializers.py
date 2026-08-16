@@ -2,6 +2,7 @@ from djoser.serializers import UserCreateSerializer as BaseUserCreateSerializer
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards, Note, DocumentPage
+from utils.token_budget import check_embedding_length
 User = get_user_model()
 import logging
 
@@ -200,9 +201,23 @@ class ChatMessageSerializer(serializers.ModelSerializer):
 
 
 class RAGChatMessageSerializer(serializers.Serializer):
+    """The one door user text walks through on its way to the embedding API.
+
+    `text` is embedded verbatim to search the chapter, and bge-small-en-v1.5
+    accepts at most 512 tokens. Rejecting here — before a ChatSession row is
+    created and before any provider quota is spent — keeps the failure a 400
+    the client can show, rather than a provider error surfacing as a 500.
+    See utils.token_budget for why the limit is what it is.
+    """
 
     chapter = serializers.UUIDField()
     text = serializers.CharField()
+
+    def validate_text(self, value):
+        problem = check_embedding_length(value)
+        if problem:
+            raise serializers.ValidationError(problem)
+        return value
 
 # ------------ generateQuestions
 

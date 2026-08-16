@@ -107,6 +107,11 @@ class CacheBackendTests(TestCase):
             "REDIS_URL": "redis://redis.internal:6379/0",
             "DJANGO_ALLOWED_HOSTS": "api.example.com",
             "CORS_ALLOWED_ORIGINS": "https://app.example.com",
+            # Embedding is a hard dependency and now guarded at boot; a
+            # production env without it is legitimately invalid.
+            "EMBEDDING_URL": "https://provider.test/embed",
+            "EMBEDDING_PROVIDER": "cloudflare",
+            "EMBEDDING_API_KEY": "test-only",
         }
         with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(
             core.settings.sys, "argv", ["manage.py", "runserver"]

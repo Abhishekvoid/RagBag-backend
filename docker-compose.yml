@@ -18,8 +18,13 @@
 # Different model, different port, different failure semantics — do not copy one
 # service's config onto the other.
 
+# Both services are tagged `full`. LEAN development uses Cloudflare Workers AI
+# and needs no local container at all:
+#   docker compose --profile full up     -> embedder + reranker (self-hosted)
+#   (LEAN: run nothing here; set EMBEDDING_PROVIDER=cloudflare in .env)
 services:
   embedder:
+    profiles: ["full"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     restart: unless-stopped
     # bge-small-en-v1.5 emits 384-dimension vectors, matching EMBEDDING_DIM=384
@@ -37,6 +42,7 @@ services:
       start_period: 120s   # first run downloads the model
 
   reranker:
+    profiles: ["full"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-base"]

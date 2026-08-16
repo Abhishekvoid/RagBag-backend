@@ -5,16 +5,16 @@ import uuid
 from types import SimpleNamespace
 from typing import List, Union, Optional
 from .ai_clients import get_pinecone_index
-from utils.tei_embedding import TEIEmbeddingClient
+from utils.embedding import EmbeddingClient
 
-tei_client = TEIEmbeddingClient()
+embedding_client = EmbeddingClient()
 logger = logging.getLogger(__name__)
 
 
 async def embed_texts(texts: Union[str, List[str]]) -> List[List[float]]:
     if isinstance(texts, str):
         texts = [texts]
-    embeddings = await tei_client.embed_texts(texts)
+    embeddings = await embedding_client.embed_texts(texts)
     return embeddings
 
 

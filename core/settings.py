@@ -257,6 +257,46 @@ PINECONE_INDEX = os.getenv("PINECONE_INDEX", "studywise-documents")
 
 if not DEBUG and not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY required in production")
+
+# ---- Embeddings -----------------------------------------------------------
+# Embedding is a HARD dependency: with no embedding service, ingestion and query
+# both fail. It previously defaulted to http://localhost:8080/embed, which in
+# production fails per-request inside a circuit breaker rather than at startup —
+# the slowest possible way to discover a missing config. These guards move that
+# failure to boot time.
+EMBEDDING_PROVIDER = (os.getenv("EMBEDDING_PROVIDER") or "tei").strip().lower()
+
+if EMBEDDING_PROVIDER not in ("tei", "cloudflare", "openai"):
+    raise ImproperlyConfigured(
+        f"EMBEDDING_PROVIDER must be one of tei/cloudflare/openai, "
+        f"got {EMBEDDING_PROVIDER!r}"
+    )
+
+EMBEDDING_URL = _require(os.getenv("EMBEDDING_URL"), "EMBEDDING_URL")
+
+# A managed provider without a key is a guaranteed 401 on every request. Only
+# self-hosted TEI is legitimately unauthenticated (it is not internet-facing).
+if EMBEDDING_PROVIDER != "tei":
+    _require(os.getenv("EMBEDDING_API_KEY"), "EMBEDDING_API_KEY")
+
+# Pooling belongs at boot time for the same reason the URL does, only more so:
+# a wrong value here does not fail a request, it returns 384 plausible floats
+# from the wrong vector space. Cloudflare defaults to mean pooling while the
+# index is CLS-pooled (measured cosine between the two: 0.93), so a typo like
+# "CLS " or "clr" silently falling back to a provider default would degrade
+# retrieval indefinitely with nothing in the logs.
+EMBEDDING_POOLING = (os.getenv("EMBEDDING_POOLING") or "cls").strip().lower()
+
+if EMBEDDING_POOLING not in ("cls", "mean"):
+    raise ImproperlyConfigured(
+        f"EMBEDDING_POOLING must be 'cls' or 'mean', got {EMBEDDING_POOLING!r}. "
+        f"bge-small-en-v1.5 is CLS-pooled; 'mean' requires a fresh index."
+    )
+
+# Reranking is SOFT and OFF by default. Unset RERANK_URL disables it; the RAG
+# pipeline falls back to vector + keyword ordering.
+RERANK_URL = (os.getenv("RERANK_URL") or "").strip()
+RERANK_ENABLED = bool(RERANK_URL)
 # Database
 DATABASES = {
     'default': {

@@ -24,6 +24,7 @@ from .rag_service import (
     make_chapter_user_filter,
 )
 from utils.tei_rerank import rerank_client
+from utils.token_budget import is_safe_to_embed
 from utils.metrics.latency import latency_tracker
 from utils.metrics.retrieval import retrieval_evaluator
 from utils.metrics.cost import cost_tracker
@@ -163,6 +164,19 @@ class RagPipeline:
 
             refined_query = await self.contextualize_query(user_query, chat_history, request_id, user_id, chapter_id)
             logger.info(f"Refined query: {refined_query}")
+
+            # The rewrite is an LLM's output, not the validated user text, so it
+            # carries none of the serializer's length guarantee — a model that
+            # answers instead of rewriting can return an essay. Fall back to the
+            # original question, which was checked at the boundary. This is the
+            # same degradation contextualize_query already applies when the LLM
+            # is unavailable, so there is no new behaviour to reason about.
+            if not is_safe_to_embed(refined_query):
+                logger.warning(
+                    "contextualized query exceeds the embedding budget; "
+                    "falling back to the original question"
+                )
+                refined_query = user_query
 
             # step 2: Router
             intent = await self.route_query(refined_query, request_id, user_id, chapter_id)
@@ -492,6 +506,22 @@ class RagPipeline:
             expanded_queries = [query]
     
         all_queries = [query] + expanded_queries
+
+        # Expansions are LLM output too. Drop any that would blow the embedding
+        # window rather than truncating them: an expansion is one of several
+        # redundant phrasings of the same question, so losing one costs a little
+        # recall, while a truncated one searches for something that was never
+        # asked. `query` itself is length-checked before it reaches here, so the
+        # list can never come back empty.
+        oversized = [q for q in all_queries if not is_safe_to_embed(q)]
+        if oversized:
+            logger.warning(
+                "dropping %d over-long expanded quer%s before embedding",
+                len(oversized),
+                "y" if len(oversized) == 1 else "ies",
+            )
+            all_queries = [q for q in all_queries if is_safe_to_embed(q)] or [query]
+
         logger.info(f"📝 Search queries: {all_queries}")
 
     # ===== STEP 3: EMBED & SEARCH =====

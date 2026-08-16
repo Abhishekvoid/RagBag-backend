@@ -13,8 +13,16 @@
 #              backend, Channels layer, and the Django cache that backs DRF
 #              throttle counters and WebSocket tickets. Single point of failure
 #              by design at this scale; separate logical DBs if that changes.
-#   embedder   TEI, HARD dependency, 384-dim model. See docker-compose.yml.
-#   reranker   TEI, SOFT dependency.
+#   embedder   TEI, HARD dependency, 384-dim model. FULL profile only.
+#   reranker   TEI, SOFT dependency.            FULL profile only.
+#
+# PROFILES. The four core services are unprofiled, so they start in every
+# configuration. The two TEI services are tagged `full`, so:
+#   docker compose --profile lean up   -> web worker redis caddy   (LEAN)
+#   docker compose --profile full up   -> the above + embedder + reranker
+# LEAN gets its embeddings from Cloudflare Workers AI (EMBEDDING_PROVIDER=
+# cloudflare) and runs no reranker at all — bge-reranker-base needs ~5.5 GB RSS,
+# more than a t4g.small has in total.
 #
 # web and worker MUST share REDIS_URL — a ticket issued by web is redeemed by
 # the socket on web, and a task queued by web is consumed by worker. Both read
@@ -91,6 +99,7 @@ services:
       retries: 5
 
   embedder:
+    profiles: ["full"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-small-en-v1.5"]
@@ -100,6 +109,7 @@ services:
       - tei_embed_cache:/data
 
   reranker:
+    profiles: ["full"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-base"]

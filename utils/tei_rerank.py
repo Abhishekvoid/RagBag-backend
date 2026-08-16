@@ -1,9 +1,14 @@
 """Reranking via a self-hosted TEI container (POST /rerank).
 
-Mirrors TEIEmbeddingClient: async httpx with bounded retries. Reranking is an
+Mirrors EmbeddingClient: async httpx with bounded retries. Reranking is an
 enhancement, never a hard dependency — any failure returns None and the caller
 falls back to the existing vector + keyword ordering, so a query never fails
 because the rerank service is down.
+
+RERANK_URL unset means DISABLED, not "try localhost". The LEAN profile ships no
+reranker container (bge-reranker-base needs ~5.5 GB of RSS, more than the whole
+instance), so the default has to be "off" rather than a localhost address that
+would burn three retries and a timeout on every single query.
 """
 import os
 import logging
@@ -17,7 +22,7 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
-RERANK_URL = os.getenv("RERANK_URL", "http://localhost:8081/rerank")
+RERANK_URL = (os.getenv("RERANK_URL") or "").strip()
 RERANK_TIMEOUT = float(os.getenv("RERANK_TIMEOUT", 10.0))
 
 RERANK_ERRORS = (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError)
@@ -52,6 +57,10 @@ class TEIRerankClient:
         """
         if not texts:
             return []
+        if not RERANK_URL:
+            # Disabled by configuration (LEAN). Not an error, and not worth a
+            # log line per query — the caller's fallback is the intended path.
+            return None
         try:
             data = await self._post(query, texts)
             scores = [0.0] * len(texts)

@@ -27,7 +27,8 @@ from channels.layers import get_channel_layer
 import uuid
 
 
-from utils.tei_embedding import TEIEmbeddingClient
+from utils.embedding import EmbeddingClient
+from utils.token_budget import split_for_embedding
 
 # ---------------------------------------------
 
@@ -131,6 +132,35 @@ def chunk_text_by_token(text, tokenizer, chunk_size=200, chunk_overlap=50):
         chunks.append(chunk_text)
         start += chunk_size - chunk_overlap
     return chunks
+
+def _delete_document_vectors(index, document_id, correlation_id=""):
+    """Remove every vector belonging to one document.
+
+    Vectors are located by the ``<doc_id>#`` id prefix set at ingestion — a
+    Pinecone serverless index cannot delete by metadata filter, so the prefix is
+    the only handle there is. Shared by ingestion (to stay idempotent across
+    retries) and cleanup_document_data (to tidy up after a delete).
+    """
+    if index is None:
+        return 0
+
+    removed = 0
+    try:
+        for id_page in index.list(prefix=f"{document_id}#"):
+            if id_page:
+                index.delete(ids=id_page)
+                removed += len(id_page)
+    except Exception as e:
+        logger.warning(
+            f"[{correlation_id}] could not clear existing vectors for "
+            f"{document_id}: {e}"
+        )
+        return removed
+
+    if removed:
+        logger.info(f"[{correlation_id}] cleared {removed} existing vectors")
+    return removed
+
 
 def extract_document_text(doc):
     """PDF -> page pipeline (vision/layer canonical text); other types -> legacy extractor."""
@@ -313,7 +343,16 @@ def process_document_ingestion(self, document_id: str):
             raise ValueError("No text available for ingestion.")
 
         
-        tei_client = TEIEmbeddingClient()
+        # Ingestion must be idempotent, because it is now genuinely re-run: a
+        # failed batch raises below, Celery retries up to 3 times, and
+        # rescan_document_with_vision re-ingests outright. Point ids embed a
+        # fresh uuid4 each pass, so without this every retry would layer another
+        # copy of the document into the index — inflating retrieval with
+        # duplicates of itself. Best-effort: a purge failure is worth a warning,
+        # not a lost document.
+        _delete_document_vectors(vector_index, document_id, correlation_id)
+
+        embedding_client = EmbeddingClient()
         pages = list(doc.pages.all())   # for per-chunk page tagging (may be empty for non-PDF)
         text_chunks = chunk_text_by_token(doc.extracted_text, tokenizer)
         text_chunks = text_chunks[:MAX_CHUNKS_PER_DOCUMENT]
@@ -330,25 +369,37 @@ def process_document_ingestion(self, document_id: str):
                               total_batches=total_batches)
 
         MIN_CHUNK_LEN = 10
-        MAX_CHUNK_LEN = 800
 
         # Pinecone serverless indexes are created lazily by get_pinecone_index()
         # and index all metadata fields automatically — no collection/payload-index
         # setup needed here.
 
         all_inserted = 0
+        failed_batches = []
         for i in range(0, len(text_chunks), BATCH):
-            
+
             chunk_batch = text_chunks[i:i + BATCH]
             chunk_batch = [c.strip() for c in chunk_batch if len(c.strip()) > MIN_CHUNK_LEN]
 
             if not chunk_batch:
                 logger.warning(f"[{correlation_id}] Empty batch at index {i}")
                 continue
-                
-            # Truncate oversized chunks
-            chunk_batch = [c[:MAX_CHUNK_LEN] for c in chunk_batch]
-            
+
+            # SPLIT oversized chunks — never truncate them.
+            #
+            # chunk_text_by_token counts cl100k tokens, which bounds nothing on
+            # the WordPiece side: a chunk of horizontal rules is 21 tiktoken
+            # tokens and 792 bge tokens. This used to be `c[:800]`, which was
+            # both insufficient (800 characters of punctuation is still ~800 bge
+            # tokens) and lossy (anything past 800 characters was dropped on the
+            # floor, with no log and no failure). Splitting keeps every character
+            # and gives the model pieces it can actually read.
+            chunk_batch = [
+                piece
+                for c in chunk_batch
+                for piece in split_for_embedding(c)
+            ]
+
             logger.info(f"[{correlation_id}] Embedding batch {i//BATCH + 1}/{(len(text_chunks)-1)//BATCH + 1} ({len(chunk_batch)} chunks)")
             push_ingestion_status(
                 doc.user.id, doc.id, PHASE_EMBEDDING,
@@ -357,9 +408,14 @@ def process_document_ingestion(self, document_id: str):
 
 
             try:
-                embeddings = async_to_sync(tei_client.embed_texts)(chunk_batch)
+                embeddings = async_to_sync(embedding_client.embed_texts)(chunk_batch)
             except Exception as e:
+                # Carry on through the remaining batches so one bad batch does
+                # not cost the whole document's progress, but REMEMBER it. The
+                # check after the loop is what stops this from ending as a
+                # "ready" document that is quietly missing vectors.
                 logger.error(f"Embedding batch failed: {e}")
+                failed_batches.append((i // BATCH + 1, f"{type(e).__name__}: {e}"))
                 continue
             points = []
 
@@ -384,6 +440,17 @@ def process_document_ingestion(self, document_id: str):
             
         
             
+        # A document with missing vectors is worse than a failed one: it answers
+        # questions, and answers them from an incomplete index, with no signal to
+        # the user that anything is wrong. Fail the task instead so it retries,
+        # and so the status the user sees matches what is actually searchable.
+        if failed_batches:
+            raise RuntimeError(
+                f"{len(failed_batches)} of {total_batches} embedding batches "
+                f"failed; the document would be indexed with missing vectors. "
+                f"First failure — batch {failed_batches[0][0]}: {failed_batches[0][1]}"
+            )
+
         push_ingestion_status(doc.user.id, doc.id, PHASE_STORING)
 
         # --- NEW: On success, mark as COMPLETED ---
@@ -455,15 +522,7 @@ def cleanup_document_data(document_ids, file_names):
 
         if index is not None:
             for document_id in document_ids:
-                try:
-                    for id_page in index.list(prefix=f"{document_id}#"):
-                        if id_page:
-                            index.delete(ids=id_page)
-                except Exception as e:
-                    logger.error(
-                        f"cleanup_document_data: failed to delete vectors for "
-                        f"document {document_id}: {e}"
-                    )
+                _delete_document_vectors(index, document_id, "cleanup")
 
     for name in file_names:
         if not name:
