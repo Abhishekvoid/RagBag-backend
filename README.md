@@ -859,7 +859,7 @@ celery -A core worker -l info      # add -P solo on Windows
 | `CORS_ALLOWED_ORIGINS` · `CSRF_TRUSTED_ORIGINS` | Browser origins allowed to call the API |
 | `REDIS_URL` | Celery broker, Channels layer, breaker state |
 | `SUPABASE_DB_{HOST,PORT,NAME,USER,PASSWORD}` | Postgres (`sslmode=require`) |
-| `SUPABASE_PROJECT_ID` · `AWS_*` | S3-compatible document and page-image storage |
+| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_STORAGE_BUCKET_NAME` · `AWS_S3_REGION_NAME` | AWS S3 document and page-image storage. Private bucket; reads are presigned URLs expiring in 1h. All four required when `DEBUG=False`; unset locally to use the filesystem |
 | `PINECONE_API_KEY` | Vector store |
 | `PINECONE_INDEX` · `PINECONE_CLOUD` · `PINECONE_REGION` | Defaults `studywise-documents` · `aws` · `us-east-1` |
 | `EMBEDDING_DIM` | `384` — enforced against every TEI response |

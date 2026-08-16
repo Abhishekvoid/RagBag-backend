@@ -222,34 +222,95 @@ SIMPLE_JWT = {
 
 SITE_ID = 1
 
-# ---------- Supabase Storage (S3-Compatible) FINAL -----------
+# ---------- Object storage (AWS S3) ----------------------------------------
+# Document uploads and rendered page images live in S3. Every read, write and
+# delete goes through Django's storage abstraction — default_storage and the
+# FileField on Document, with no direct boto3 client anywhere in the app — so
+# changing provider is a settings change and nothing else.
+#
+# This previously pointed at Supabase Storage, which is S3-compatible but is not
+# S3, and the difference was three settings:
+#
+#   AWS_S3_ENDPOINT_URL       Supabase needs an explicit host. AWS does not:
+#                             boto3 derives the endpoint from bucket + region.
+#                             The variable is gone rather than blanked, because
+#                             a stale endpoint pointing at an abandoned domain
+#                             is a worse failure than a missing one.
+#   AWS_S3_ADDRESSING_STYLE   Supabase requires the legacy path style. AWS wants
+#                             virtual-hosted, and requires it for buckets made
+#                             after September 2020.
+#   MEDIA_URL                 was a hand-built Supabase public-object template.
+#                             See below — it was never actually used.
+
+AWS_ACCESS_KEY_ID = _require(os.getenv("AWS_ACCESS_KEY_ID"), "AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = _require(
+    os.getenv("AWS_SECRET_ACCESS_KEY"), "AWS_SECRET_ACCESS_KEY"
+)
+AWS_STORAGE_BUCKET_NAME = _require(
+    os.getenv("AWS_STORAGE_BUCKET_NAME"), "AWS_STORAGE_BUCKET_NAME"
+)
+# No default. us-east-1 is the tempting one to fall back to and it is the worst
+# choice available: it is the only region where a wrong guess still signs
+# successfully against the wrong bucket namespace instead of failing outright.
+AWS_S3_REGION_NAME = _require(os.getenv("AWS_S3_REGION_NAME"), "AWS_S3_REGION_NAME")
+
+AWS_S3_ADDRESSING_STYLE = "virtual"
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+
+AWS_S3_FILE_OVERWRITE = False
+
+# The bucket is PRIVATE: Block Public Access on, no public-read policy, no
+# public ACLs. These are user-uploaded documents and page images rendered from
+# them, so an anonymously-readable object URL is a data leak — and an S3 key
+# built from a user id and a document uuid is not a secret, it is merely
+# unguessable, which is not the same thing.
+#
+# So reads are served by presigned URLs. django-storages signs each one with the
+# server's IAM credentials at .url() time; the browser then fetches the object
+# directly from S3 with no further authorisation.
+#
+# This is a read-path setting only, and does not restrict the application:
+# uploads and deletes authenticate with the IAM credentials above and do not
+# depend on the object being publicly readable.
+AWS_QUERYSTRING_AUTH = True
+
+# How long a signed read URL stays valid. One hour: long enough to open a
+# document and read it, short enough that a URL pasted into a chat or leaked
+# through a Referer header stops working the same afternoon. Set explicitly
+# rather than left to the library default, because "how long is a leaked link
+# live for" is a security decision and belongs in the open.
+#
+# Consequence worth knowing: URLs are not stable, so they must not be cached,
+# stored in the database, or embedded in anything long-lived. Call .url() when
+# the file is actually served.
+AWS_QUERYSTRING_EXPIRE = 3600
+
+# S3Boto3Storage builds object URLs from bucket + region + addressing style and
+# never consults MEDIA_URL — verified against django-storages 1.14.6, which
+# returns https://<bucket>.s3.<region>.amazonaws.com/<key> under virtual-hosted
+# addressing. The Supabase URL that used to sit here was therefore dead config
+# that merely looked authoritative, and it is deliberately not replaced with an
+# AWS-shaped equivalent: deriving the URL is the backend's job, and a second
+# hand-written copy of that logic is a second thing to get wrong.
+#
+# These two matter only for the local filesystem fallback below.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# S3 whenever a bucket is configured. Without one — which _require permits only
+# in DEBUG or under the test runner — fall back to the local filesystem, so that
+# `manage.py check`, `manage.py test` and ordinary local development need no AWS
+# account and no credentials at all.
 STORAGES = {
-    "default": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-    },
+    "default": (
+        {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"}
+        if AWS_STORAGE_BUCKET_NAME
+        else {"BACKEND": "django.core.files.storage.FileSystemStorage"}
+    ),
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
-
-SUPABASE_PROJECT_ID = os.getenv("SUPABASE_PROJECT_ID")
-
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-
-AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
-
-AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
-
-AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME")
-
-AWS_S3_SIGNATURE_VERSION = "s3v4"
-AWS_S3_ADDRESSING_STYLE = "path"
-
-AWS_S3_FILE_OVERWRITE = False    
-AWS_QUERYSTRING_AUTH = False 
-
-MEDIA_URL = f"https://{SUPABASE_PROJECT_ID}.storage.supabase.co/storage/v1/object/public/{AWS_STORAGE_BUCKET_NAME}/"
 
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
