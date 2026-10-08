@@ -1,9 +1,15 @@
-# backend/rag_pipeline.py
 
 import os
 import re
 import asyncio
 import logging
+from dataclasses import dataclass, field
+from enum import Enum
+
+import httpx
+from openai import APITimeoutError
+from tenacity import RetryError
+from urllib3.exceptions import TimeoutError as Urllib3TimeoutError
 from django.conf import settings
 from dotenv import load_dotenv
 import numpy as np 
@@ -17,10 +23,12 @@ from utils.formatting import enforce_markdown_spacing
 import time
 import uuid
 
+from asgiref.sync import sync_to_async
+
 from utils.llm_gateway import ask_llm, LLMUnavailable
 from .rag_service import (
     embed_texts,
-    search_vectors,
+    hybrid_search,
     make_chapter_user_filter,
 )
 from utils.tei_rerank import rerank_client
@@ -66,8 +74,72 @@ def build_answer_messages(context: str, query: str) -> list:
     ]
 
 
+# How much chapter text a summary may consume. ANSWER_MODEL has a very large
+# context window, so this is a cost and latency bound rather than a technical
+# one — and when it binds, the user is told, because a summary that silently
+# covers only the first third of a chapter is worse than no summary.
+SUMMARY_CHAR_BUDGET = 60_000
+
+# The retrieval funnel, named rather than inlined so the shape is readable in
+# one place: fuse everything, hand a shortlist to the cross-encoder, keep the
+# best few for the prompt. FINAL_CHUNKS * ~200 tokens is the context budget.
+RERANK_CANDIDATES = 20
+FINAL_CHUNKS = 8
+
+VALID_INTENTS = ("greeting", "summary", "ambiguous", "question")
+
+DEFAULT_INTENT = "question"
+
+CONTEXTUALIZE_AND_ROUTE_PROMPT = """You prepare a student's message for a study assistant.
+
+Do TWO things and return only JSON.
+
+1. standalone_question — rewrite the message so it can be understood WITHOUT the
+   chat history: resolve pronouns and references like "it", "that", "the second one".
+   If it already stands alone, return it unchanged. Do NOT answer it.
+
+2. intent — classify the ORIGINAL message as exactly one of:
+   "greeting"  — hello, hi, who are you
+   "summary"   — summarize this, what is this document about, give me an overview
+   "ambiguous" — too vague to act on even with the history ("explain", "more", "tell me")
+   "question"  — anything specific: concepts, definitions, mechanisms, examples
+
+Chat history:
+{history}
+
+Message: {query}
+
+Return ONLY: {{"standalone_question": "...", "intent": "..."}}"""
+
+
+def parse_contextualize_and_route(raw: str, fallback_query: str):
+    
+    """
+    parsing contextualization + intent_routing LLM call...
+    
+    """
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return fallback_query, DEFAULT_INTENT        
+
+    if not isinstance(data, dict):
+        return fallback_query, DEFAULT_INTENT
+
+    question = data.get("standalone_question")
+    question = question.strip() if isinstance(question, str) else ""
+
+    intent = data.get("intent")
+    intent = intent.strip().lower() if isinstance(intent, str) else ""
+
+    return (
+        question or fallback_query,
+        intent if intent in VALID_INTENTS else DEFAULT_INTENT,
+    )
+
+
 def parse_followups(raw: str) -> list:
-    """Parse a follow-ups JSON string into up to 3 clean questions. Never raises."""
+    """Parse a follow-ups JSON string into up to 3 clean questions."""
     try:
         data = json.loads(raw)
         items = data.get("followups", [])
@@ -98,16 +170,67 @@ def build_sources(final_results) -> list:
     return sources
 
 
-def _result(answer: str, sources=None, followups=None) -> dict:
-    return {
-        "answer": answer,
-        "sources": sources or [],
-        "followups": followups or [],
-    }
+class PipelineOutcome(str, Enum):
+    SUCCESS = "success"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    RATE_LIMITED = "rate_limited"
+
+
+@dataclass
+class PipelineResult:
+    outcome: PipelineOutcome
+    answer: str = ""
+    sources: list = field(default_factory=list)
+    followups: list = field(default_factory=list)
+    error: str = ""
+
+
+def _result(answer: str, sources=None, followups=None,
+            outcome=PipelineOutcome.SUCCESS) -> PipelineResult:
+    return PipelineResult(outcome, answer, sources or [], followups or [])
+
+
+def _failure(error: Exception) -> PipelineResult:
+    """Classify provider errors, including exhausted retries and SDK wrappers.
+
+    Provider exception text can contain credentials or request bodies. Only
+    fixed, public messages leave the pipeline in an error response.
+    """
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        response = getattr(error, "response", None)
+        code = (getattr(error, "status_code", None)
+                or getattr(error, "status", None)
+                or getattr(response, "status_code", None))
+        if str(code) == "429":
+            return PipelineResult(
+                PipelineOutcome.RATE_LIMITED,
+                error="AI service rate limit reached. Please try again shortly.",
+            )
+        if isinstance(error, (TimeoutError, httpx.TimeoutException,
+                              APITimeoutError, Urllib3TimeoutError)) or str(code) in ("408", "504"):
+            return PipelineResult(
+                PipelineOutcome.DEADLINE_EXCEEDED,
+                error="The AI service timed out. Please try again.",
+            )
+        if isinstance(error, RetryError):
+            error = error.last_attempt.exception()
+        else:
+            error = (error.__cause__ or getattr(error, "reason", None)
+                     or error.__context__)
+        if not isinstance(error, BaseException):
+            break
+    return PipelineResult(
+        PipelineOutcome.DEPENDENCY_UNAVAILABLE,
+        error="AI is temporarily unavailable. Please try again shortly.",
+    )
 
 
 class RagPipeline:
-    def __init__(self, embedding_model, api_key=None):
+    def __init__(self, embedding_model):
         # The shared client encodes the provider choice; constructing a second
         # one here would bypass the retry / empty-completion wiring in
         # utils.llm_wrapper.
@@ -141,7 +264,7 @@ class RagPipeline:
 
         return any(re.search(rf"\b{greet}\b", query) for greet in greetings)
         
-    async def run(self, user_query, chat_history, chapter_id, user_id):
+    async def run(self, user_query, chat_history, chapter_id, user_id) -> PipelineResult:
         # step 1: contextualization
 
         request_id = str(uuid.uuid4())
@@ -160,17 +283,14 @@ class RagPipeline:
         try:
 
             if self.is_greeting(user_query):
+                status = PipelineOutcome.SUCCESS.value
                 return _result(await self.handle_greeting(user_query))
 
-            refined_query = await self.contextualize_query(user_query, chat_history, request_id, user_id, chapter_id)
-            logger.info(f"Refined query: {refined_query}")
+            refined_query, intent = await self.contextualize_and_route(
+                user_query, chat_history, request_id, user_id, chapter_id
+            )
+            logger.info(f"Refined query: {refined_query} | intent: {intent}")
 
-            # The rewrite is an LLM's output, not the validated user text, so it
-            # carries none of the serializer's length guarantee — a model that
-            # answers instead of rewriting can return an essay. Fall back to the
-            # original question, which was checked at the boundary. This is the
-            # same degradation contextualize_query already applies when the LLM
-            # is unavailable, so there is no new behaviour to reason about.
             if not is_safe_to_embed(refined_query):
                 logger.warning(
                     "contextualized query exceeds the embedding budget; "
@@ -178,19 +298,17 @@ class RagPipeline:
                 )
                 refined_query = user_query
 
-            # step 2: Router
-            intent = await self.route_query(refined_query, request_id, user_id, chapter_id)
-            logger.info(f"Detected intent: {intent}")
-
-            # step 3: Execute strategy
-            if intent == "summary":
-                result =  _result(await self.handle_summary(chapter_id, user_id))
+            # step 2: Execute strategy
+            if intent == "greeting":
+                result = _result(await self.handle_greeting(refined_query))
+            elif intent == "summary":
+                result = await self.handle_summary(chapter_id, user_id)
             elif intent == "ambiguous":
                 result =  _result("I'm not sure I understand. Could you clarify your question about this document?")
             else:
                 result = await self.handle_rag_search(refined_query, chapter_id, user_id, request_id)
             
-            status = "success"
+            status = result.outcome.value
             return result
         except Exception as e:
             status = "failed"
@@ -224,192 +342,87 @@ class RagPipeline:
             )
 
     
-    async def contextualize_query(self, query, history, request_id, user_id, chapter_id):
-        """
-        Turn last user question into a standalone question using chat history.
-        """
-
+    async def contextualize_and_route(self, query, history, request_id, user_id, chapter_id):
+        """Rewrite the question to stand alone AND classify its intent, in ONE call."""
         start_time = time.monotonic()
         status = "unknown"
-        result = None
+        result = (query, DEFAULT_INTENT)
 
         logger.info(
-            "contextualization_request_stared",
-            extra= {
-                "event": "contextualization_start",
-                "stage": "contexttualization",
+            "contextualize_and_route_started",
+            extra={
+                "event": "contextualize_and_route_started",
+                "stage": "contextualize_and_route",
                 "request_id": request_id,
                 "user_id": str(user_id),
                 "chapter_id": str(chapter_id),
-            }
+            },
         )
-        try: 
-            if not history:
-                result = query
-                status = "skipped"
 
-            else:
-                # use last few messages – you can tweak slice later
-                history_context = "\n".join([f"{msg.sender}: {msg.text}" for msg in history[-5:]])
+        try:
+            history_context = "\n".join(
+                f"{msg.sender}: {msg.text}" for msg in (history or [])[-5:]
+            ) or "(no previous messages)"
 
-                prompt = f""" 
-                Given the following chat history and the latest user question, 
-                rewrite the question to be a standalone query that can be understood without the history.
-                Do NOT answer the question. Just rewrite it.
+            prompt = CONTEXTUALIZE_AND_ROUTE_PROMPT.format(
+                history=history_context, query=query
+            )
 
-                Chat History:
-                {history_context}
-
-                user Question: {query}
-
-                standalone Question:
-                """
-
-                try:
+            try:
+                async with latency_tracker.track_async("contextualize_and_route"):
                     completion = await ask_llm(
                         self.llm_client,
                         messages=[{"role": "user", "content": prompt}],
                         model=LLM_MODEL,
-                        temperature=0.1,
-                        timeout=5.0,
+                        json_mode=True,
+                        temperature=0,
+                        max_tokens=1200,
+                        timeout=20.0,
                     )
-                    result =  completion.choices[0].message.content.strip()
-
-                    status = "success"
-                    
-                
-                except LLMUnavailable:
-                    logger.info("Contextualization skipped - LLM unaviavble")
-                    result = query
-                    status = "degraded"
-                except Exception as e:
-                    logger.error(f"Contextualization failed: {e}")
-                    result =  query
-                    status = "degraded"
-        except Exception as e:
-
-            status = "failed"
-            logger.exception(
-                "Contextualization failed",
-                extra = {
-                    "event": "contextualization_failed",
-                    "stage": "contextualization",
-                    "request_id": request_id,
-                    "user_id": str(user_id),
-                    "chapter_id": str(chapter_id),
-                }
-            )
-            raise
-
-        finally:
-            total_latency_ms = (time.monotonic() - start_time) * 1000
-
-            logger.info(
-                 "contextualization completed",
-                extra={
-                    "event": "contextualization completed",
-                    "stage": "contextualization",
-                    "request_id": request_id,
-                    "user_id": str(user_id),
-                    "chapter_id": str(chapter_id),
-                    "status": status,
-                    "total_latency_ms": round(total_latency_ms, 2),
-                }
-            )
-        return result
-
-    async def route_query( self, query, request_id,  user_id, chapter_id):
-
-
-        start_time = time.monotonic()
-        status = "unknown"
-        result = None
-
-        try:
-            """
-            Classifies the query intent.
-            """
-            logger.info(
-                "routing started",
-                extra = {
-
-                    "event": "routing_started",
-                    "stage": "routing",
-                    "request_id": str(request_id),
-                    "user_id": str(user_id),
-                    "chapter_id": str(chapter_id),
-                }
-            )
-            
-            prompt = f""" 
-            Classify the following user query into one of these categories:
-            1. "greeting" (Hello, Hi, who are you)
-            2. "summary" (Summarize this, what is this doc about, give me an overview)
-            3. "ambiguous" (Vague requests like "explain", "more", "tell me")
-            4. "question" (Specific questions about content, definitions, concepts)
-
-            Query: {query}
-
-            Return only the category name (lowercase)
-            """
-
-            try:
-                completion = await ask_llm(
-                    self.llm_client,
-                    messages=[{"role": "user", "content": prompt}],
-                    model=LLM_MODEL,
-                    temperature=0,
-                    timeout=3.0,
+                result = parse_contextualize_and_route(
+                    completion.choices[0].message.content, query
                 )
-                intent = completion.choices[0].message.content.strip().lower()
-                if intent not in ["greeting", "summary", "ambiguous", "question"]:
-                    result =  "question"
-                else:
-                    result =  intent
-
                 status = "success"
-            
             except LLMUnavailable:
-                logger.info(f"cannot decide the route -> llm is unavailable")
-                result = "question"
+                logger.info("contextualize_and_route skipped — LLM unavailable")
                 status = "degraded"
             except Exception as e:
-                logger.error(f"Intent routing failed: {e}")
-                result = "question"
+                logger.error(f"contextualize_and_route failed: {e}")
                 status = "degraded"
-        except Exception as e:
-            
-            status = "failed"
 
+        except Exception:
+            status = "failed"
             logger.exception(
-                "routing failed",
+                "contextualize_and_route_failed",
                 extra={
-                    "event": "routing_failed",
-                    "stage": "routing",
-                    "request_id": str(request_id),
+                    "event": "contextualize_and_route_failed",
+                    "stage": "contextualize_and_route",
+                    "request_id": request_id,
                     "user_id": str(user_id),
                     "chapter_id": str(chapter_id),
-                }
+                },
             )
-
             raise
         finally:
-            total_latency_ms = (time.monotonic() - start_time) * 1000
-        
             logger.info(
-                "routing query completed", extra = {
-                 "event": "routing completed",
-                    "stage": "routing",
+                "contextualize_and_route_completed",
+                extra={
+                    "event": "contextualize_and_route_completed",
+                    "stage": "contextualize_and_route",
                     "request_id": request_id,
                     "user_id": str(user_id),
                     "chapter_id": str(chapter_id),
                     "status": status,
-                    "total_latency_ms": round(total_latency_ms, 2), }
-            )       
-        return result     
+                    "intent": result[1],
+                    "total_latency_ms": round((time.monotonic() - start_time) * 1000, 2),
+                },
+            )
+
+        return result
+
 
     async def _generate_followups(self, query: str, answer: str) -> list:
-        """Cheap 8B call: 2-3 next questions a student might ask. []-safe."""
+        """Cheap 8B call: 2-3 next questions a student might ask"""
         prompt = (
             "You suggest what a student might naturally ask NEXT. "
             "Given their question and the tutor's answer, return 2-3 short, "
@@ -425,10 +438,6 @@ class RagPipeline:
                 model=LLM_MODEL,
                 json_mode=True,
                 temperature=0.5,
-                # Reasoning model: hidden reasoning is billed against max_tokens
-                # before any content is emitted, so the old 200 budget returned
-                # empty completions. Headroom, not extra output — the prompt
-                # still caps the followups at 12 words each.
                 max_tokens=1200,
                 timeout=30.0,
             )
@@ -444,13 +453,80 @@ class RagPipeline:
         )
 
     async def handle_summary(self, chapter_id, user_id):
-        # later you can actually summarize chapter documents here
-        return "Here is a summary of the chapter... (Implementation pending DB fetch)"
+        """Summarise a chapter from its stored txt deliberately not via retrieval."""
+
+        text = await self._chapter_text(chapter_id, user_id)
+
+        if not text:
+            return _result(
+                "I couldn't find any readable text in this chapter yet. "
+                "If you just uploaded it, give it a moment to finish processing.",
+                outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE,
+            )
+
+        if len(text) > SUMMARY_CHAR_BUDGET:
+            # Say so rather than quietly summarising the first N characters and
+            # calling it a summary of the chapter.
+            logger.warning(
+                "summary input truncated: %d -> %d chars (chapter %s)",
+                len(text), SUMMARY_CHAR_BUDGET, chapter_id,
+            )
+            text = text[:SUMMARY_CHAR_BUDGET]
+            truncated = True
+        else:
+            truncated = False
+
+        messages = [
+            {"role": "system", "content": TUTOR_SYSTEM_PROMPT},
+            {"role": "user", "content": (
+                "Summarise the student's material below so they can see the shape "
+                "of the whole chapter: what it covers, the main ideas in order, and "
+                "how they connect. Lead with one sentence on what the chapter is "
+                "about, then the key points. Keep it tight.\n\n"
+                f"STUDENT'S MATERIAL:\n{text}"
+            )},
+        ]
+
+        try:
+            async with latency_tracker.track_async("summary_generation"):
+                completion = await ask_llm(
+                    self.llm_client,
+                    messages=messages,
+                    model=ANSWER_MODEL,
+                    temperature=0.4,
+                    max_tokens=4000,
+                    timeout=45.0,
+                )
+            summary = enforce_markdown_spacing(completion.choices[0].message.content or "")
+        except Exception as e:
+            logger.error(f"Summary generation failed: {e}", exc_info=True)
+            return _failure(e)
+
+        if truncated:
+            summary += (
+                "\n\n*(This chapter is long — the summary above covers the earlier "
+                "sections. Ask about a specific topic for the rest.)*"
+            )
+        return _result(summary)
+
+    @staticmethod
+    @sync_to_async
+    def _chapter_text(chapter_id, user_id) -> str:
+     
+        from .models import Document as _Document
+
+        texts = (
+            _Document.objects
+            .filter(chapter_id=chapter_id, user_id=user_id)
+            .exclude(extracted_text="")
+            .exclude(extracted_text__isnull=True)
+            .order_by("created_at")
+            .values_list("extracted_text", flat=True)
+        )
+        return "\n\n---\n\n".join(t for t in texts if t and t.strip())
 
     async def _expand_queries(self, query: str, num: int = 4) -> list[str]:
-        """
-        Your old expand_queries_async, but now as a method using self.llm_client.
-        """
+       
         expansion_prompt = f"Generate {num} alternative phrasings of the following query for retrieval:\n\n{query}"
         completion = await ask_llm(
             self.llm_client,
@@ -460,19 +536,16 @@ class RagPipeline:
         )
         expanded = completion.choices[0].message.content.strip().split("\n")
         return [q.strip("-• ") for q in expanded if q.strip()]
+    
     async def handle_rag_search(self, query: str, chapter_id: str, user_id: str, request_id=None):
        
 
         logger.info(f"starting RAg search for chapter{chapter_id}, user {user_id}")
         logger.info(f"query: {query}")
-        
-    # ===== STEP 1: SELF-HEALING CHECK =====
-        logger.info("Skipping count check — going directly to search")
-            
 
+        logger.info("Skipping count check going directly to search")
         
-    # ===== STEP 2: INTELLIGENT QUERY EXPANSION =====
-        logger.info("🔍 Expanding query intelligently...")
+        logger.info("Expanding query intelligently...")
         
         expansion_prompt = f"""Analyze this student's question and generate 3 strategic search queries to find the most relevant information.
 
@@ -501,18 +574,13 @@ class RagPipeline:
         except LLMUnavailable:
             logger.info(f"Query Expansion failed -> llm unavialable")
             expanded_queries = [query]
+
         except Exception as e:
             logger.error(f"Query expansion failed: {e}")
             expanded_queries = [query]
     
         all_queries = [query] + expanded_queries
 
-        # Expansions are LLM output too. Drop any that would blow the embedding
-        # window rather than truncating them: an expansion is one of several
-        # redundant phrasings of the same question, so losing one costs a little
-        # recall, while a truncated one searches for something that was never
-        # asked. `query` itself is length-checked before it reaches here, so the
-        # list can never come back empty.
         oversized = [q for q in all_queries if not is_safe_to_embed(q)]
         if oversized:
             logger.warning(
@@ -522,111 +590,69 @@ class RagPipeline:
             )
             all_queries = [q for q in all_queries if is_safe_to_embed(q)] or [query]
 
-        logger.info(f"📝 Search queries: {all_queries}")
+        # ------------------------------------------------------------
+        logger.info(f" Search queries: {all_queries}")
 
-    # ===== STEP 3: EMBED & SEARCH =====
-        logger.info("🔢 Embedding queries...")
+        logger.info("Embedding queries...")
         try:
             async with latency_tracker.track_async("embeddings"):
                 all_embeddings = await embed_texts(all_queries)
-                logger.info(f"✅ Generated {len(all_embeddings)} embeddings")
-        except Exception as e:
-            logger.error(f"❌ Embedding failed: {e}")
-            return _result("Failed to process your question. Please try again.")
-        
-        logger.info("🧪 Testing search WITHOUT filter to verify embeddings work...")
-
-        # try:
-        #     # Search without any filter to see if we get ANY results
-        #     test_results = await search_qdrant_vectors(
-        #         [all_embeddings[0]],  # Just test with first embedding
-        #         filter=None,  # NO FILTER
-        #         limit_per_vector=5
-        #     )
-            
-        #     logger.info(f"Test search (no filter) returned {len(test_results)} results")
-            
-        #     if test_results and len(test_results) > 0:
-        #         logger.info("Embeddings are working! Problem is with the filter.")
-        #         logger.info(f"Sample result chapter_id: {test_results[0].payload.get('chapter_id')}")
-        #         logger.info(f"Sample result user_id: {test_results[0].payload.get('user_id')}")
-        #         logger.info(f"Your filter chapter_id: {chapter_id}")
-        #         logger.info(f"Your filter user_id: {user_id}")
-        #     else:
-        #         logger.error("Even without filter, no results! Embedding model mismatch?")
+                logger.info(f"Generated {len(all_embeddings)} embeddings")
                 
-        # except Exception as e:
-        #     logger.error(f"Test search failed: {e}", exc_info=True)
-
-        # # Now do the normal filtered search
-        # logger.info(f"Searching with filter: chapter_id={chapter_id}, user_id={user_id}")
-
-        # # ===== Also check what's actually stored in Qdrant =====
-        # logger.info("Checking what's in Qdrant for this chapter...")
-
-        logger.info(f"FILTER DEBUG → user_id={user_id}, chapter_id={chapter_id}")
+        except Exception as e:
+            logger.error(f" Embedding failed: {e}")
+            return _failure(e)
+        
+        logger.info(f"Search scope → user_id={user_id}, chapter_id={chapter_id}")
 
         search_filter = {
             "user_id": {"$eq": str(user_id)},
             "chapter_id": {"$eq": str(chapter_id)},
         }
 
-        logger.info("🔍 Searching vector database...")
-        try: 
+        logger.info("Searching vector database (hybrid + RRF...")
+        try:
+    
             async with latency_tracker.track_async("vector_search"):
-                flat_results = await search_vectors(
+                flat_results = await hybrid_search(
                     all_embeddings,
+                    query_text=query,
                     filter=search_filter,
-                    limit_per_vector=15  # Get more results for reranking
+                    limit_per_vector=15,  # controls how many candidates are retrieved for each embedding
                 )
-                logger.info(f" Retrieved {len(flat_results)} results from Pinecone")
+                logger.info(f" Retrieved {len(flat_results)} fused results")
 
             if not flat_results:
                 logger.warning("Strict filter failed → fallback to user_id only")
 
                 fallback_filter = {"user_id": {"$eq": str(user_id)}}
-                flat_results = await search_vectors(
+                flat_results = await hybrid_search(
                     all_embeddings,
+                    query_text=query,
                     filter=fallback_filter,
-                    limit_per_vector=15
+                    limit_per_vector=15,
                 )
 
-
-            import re
-            query_words = set(re.findall(r"\w+", query.lower()))
-            KEYWORD_BOOST = 0.05
-
-            for r in flat_results:
-                if r.payload and "text" in r.payload:
-                    text_words = r.payload.get("text", "").lower()
-                    keyword_hits = sum(1 for w in query_words if w in text_words)
-                    r.score = float(r.score) + (KEYWORD_BOOST * keyword_hits)
-
-            flat_results.sort(key=lambda x: x.score, reverse=True)
-
+      
 
             if flat_results and len(flat_results) > 0:
                 first_result = flat_results[0]
+                
                 if first_result and first_result.payload:
                     preview = first_result.payload.get('text', '')[:200]
-                    logger.info(f"📄 First result preview: {preview}...")
-                    logger.info(f"📊 First result score: {first_result.score}")
+                    logger.info(f"First result preview: {preview}...")
+                    logger.info(f" First result score: {first_result.score}")
                 else:
-                    logger.error("❌ First result has no payload!")
+                    logger.error(" First result has no payload!")
             else:
-                logger.error("❌ NO RESULTS returned from vector search!")
-                return _result("I couldn't find relevant information in your document. This might be a technical issue.")
+                logger.error(" NO RESULTS returned from vector search!")
+                return _result("I couldn't find relevant information in your document.",
+                               outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE)
         except Exception as e:
-            logger.error(f"❌ Vector search failed: {e}", exc_info=True)
-            return _result("Search failed. Please try again.")
+            logger.error(f" Vector search failed: {e}", exc_info=True)
+            return _failure(e)
             
 
-        # reranking 
-
-        logger.info("Reranking results by relevance...")
-        flat_results = flat_results[:40]
-
-# deduplicate
         seen = set()
         unique_results = []
         for r in flat_results:
@@ -638,25 +664,24 @@ class RagPipeline:
         logger.info(f"Deduped: {len(unique_results)} chunks")
 
         if len(unique_results) > 5:
-            RERANK_LIMIT = min(len(unique_results), 20)
-            candidates = unique_results[:RERANK_LIMIT]
+            candidates = unique_results[:RERANK_CANDIDATES]
             texts = [r.payload["text"] for r in candidates]
 
             async with latency_tracker.track_async("reranking"):
                 scores = await rerank_client.rerank(query, texts)
 
             if scores:
-                # Apply rerank scores to the candidates and reorder.
+         
                 for r, s in zip(candidates, scores):
                     r.score = float(s)
-                final_results = sorted(candidates, key=lambda x: x.score, reverse=True)[:8]
+                final_results = sorted(candidates, key=lambda x: x.score, reverse=True)[:FINAL_CHUNKS]
                 logger.info(f"Reranked {len(final_results)} chunks. Top score={final_results[0].score:.3f}")
             else:
-                # Rerank service unavailable — keep the vector + keyword order.
-                logger.warning("Rerank unavailable; falling back to vector ordering")
-                final_results = unique_results[:8]
+            
+                logger.warning("Rerank unavailable; falling back to RRF ordering")
+                final_results = unique_results[:FINAL_CHUNKS]
         else:
-            final_results = unique_results[:8]
+            final_results = unique_results[:FINAL_CHUNKS]
 
         retrieval_evaluator.evaluate(
             query=query,
@@ -668,18 +693,18 @@ class RagPipeline:
         ])
 
         context_length = len(context)
-        logger.info(f"📄 Context built: {context_length} characters")
-        logger.info(f"📄 Context preview: {context[:300]}...")
+        logger.info(f" Context built: {context_length} characters")
+        logger.info(f"Context preview: {context[:300]}...") 
         
         if context_length < 100:
-            logger.error(f"❌ Context too short: {context_length} chars")
-            return _result("I found very limited information in your document. Please ensure it uploaded correctly.")
+            logger.error(f" Context too short: {context_length} chars")
+            return _result("I found very limited information in your document. Please ensure it uploaded correctly.",
+                           outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE)
     
-        logger.info(f"📄 Context built: {len(context)} chars from {len(final_results)} chunks")
+        logger.info(f" Context built: {len(context)} chars from {len(final_results)} chunks")
 
         # ===== STEP 6: GENERATE ANSWER =====
-        logger.info("🤖 Generating answer...")
-
+        logger.info(" Generating answer...")
         answer_messages = build_answer_messages(context, query)
 
         try:
@@ -689,15 +714,13 @@ class RagPipeline:
                     messages=answer_messages,
                     model=ANSWER_MODEL,
                     temperature=0.4,      # natural prose, not robotic
-                    # room for adaptive length, plus the reasoning tokens Ultra
-                    # spends before it starts writing the answer
                     max_tokens=4000,
                     timeout=45.0,
                 )
 
             raw_output = chat_completion.choices[0].message.content
-            logger.info(f"✅ Generated response ({len(raw_output)} chars)")
-            logger.info(f"📄 Response preview: {raw_output[:200]}...")
+            logger.info(f" Generated response ({len(raw_output)} chars)")
+            logger.info(f" Response preview: {raw_output[:200]}...")
 
             formatted_output = enforce_markdown_spacing(raw_output)
 
@@ -706,13 +729,9 @@ class RagPipeline:
 
             return _result(formatted_output, sources=sources, followups=followups)
 
-        except LLMUnavailable:
-            logger.warning("Answer generation skipped — LLM unavailable")
-            return _result("AI is temporarily unavailable. Please try again shortly.")
-
         except Exception as e:
-            logger.error(f"❌ Answer generation failed: {e}", exc_info=True)
-            return _result("Failed to generate an answer. Please try again.")
+            logger.error(f" Answer generation failed: {e}", exc_info=True)
+            return _failure(e)
         
        
 

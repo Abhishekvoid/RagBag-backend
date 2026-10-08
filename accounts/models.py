@@ -171,6 +171,7 @@ class ChatMessage(models.Model):
     citations = models.JSONField(null=True, blank=True)
     suggestions = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True)
+    is_unanswered = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

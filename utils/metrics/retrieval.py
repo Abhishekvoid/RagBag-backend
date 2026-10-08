@@ -1,6 +1,53 @@
-from typing import List, Dict
+from typing import Iterable, List, Dict, Sequence
 from threading import Lock
 from dataclasses import dataclass
+
+
+# --- offline evaluation ------------------------------------------------------
+#
+# These are for the golden-set harness (manage.py eval_retrieval), NOT for the
+# live request path.
+#
+# They exist because the online metric below cannot be used to judge hybrid
+# retrieval. `RetrievalEvaluator.evaluate` scores relevance by keyword overlap
+# between the query and the chunk; hybrid retrieval ADDS a lexical retriever.
+# Measuring a lexical retriever with a lexical metric is circular — the number
+# would rise whether or not students got better answers, which is worse than
+# having no number at all.
+#
+# Recall and MRR against hand-labelled relevant chunks are independent of how
+# the chunks were found, which is the only property that makes a before/after
+# comparison mean anything.
+
+
+def recall_at_k(retrieved_ids: Sequence[str], relevant_ids: Iterable[str], k: int) -> float:
+    """Fraction of the relevant chunks that appear in the top k.
+
+    Answers "did retrieval find the material?" — the question hybrid retrieval
+    is supposed to improve.
+    """
+    relevant = set(relevant_ids)
+    if not relevant:
+        return 0.0
+    top = set(retrieved_ids[:k])
+    return len(top & relevant) / len(relevant)
+
+
+def mrr_at_k(retrieved_ids: Sequence[str], relevant_ids: Iterable[str], k: int) -> float:
+    """Reciprocal rank of the FIRST relevant chunk in the top k, else 0.
+
+    Answers "did retrieval rank the material highly?" — which is the question
+    that actually matters once the candidate pool is small enough that recall
+    saturates, and the question RRF is supposed to improve. Reported alongside
+    recall precisely because the two can move independently.
+    """
+    relevant = set(relevant_ids)
+    if not relevant:
+        return 0.0
+    for position, chunk_id in enumerate(retrieved_ids[:k], start=1):
+        if chunk_id in relevant:
+            return 1.0 / position
+    return 0.0
 
 @dataclass
 class RetrievalMetrics:

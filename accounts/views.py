@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import RegisterSerializers, ChatMessageSerializer, ChatSessionSerializer, DocumentSerializer, SubjectWriteSerializer, SubjectReadSerializer, ChapterReadSerializer, ChapterWriteSerializer,  RAGChatMessageSerializer, GeneratedQuestionsSerializer,GeneratedFlashCardsSerializer, MeSerializer, NoteSerializer, DocumentPageSerializer
 import logging, time
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards, Note
@@ -28,7 +29,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
-from .rag_pipeline import RagPipeline
+from .rag_pipeline import RagPipeline, PipelineOutcome
 from .ai_clients import LLM_MODEL, llm_client
 from .ws_auth import WS_TICKET_TTL, issue_ticket
 
@@ -546,13 +547,12 @@ class RAGChatMessageView(APIView):
                     status=status.HTTP_409_CONFLICT
                 )
 
-            # Only after the status check passes, we create the session and message
+            # Failed attempts must not leave chat messages behind for retries.
             session, _ = ChatSession.objects.get_or_create(
                 user=user,
                 chapter_id=chapter_id,
                 defaults={'title': f"Chat for chapter {chapter_id}"}
             )
-            ChatMessage.objects.create(session=session, sender='user', text=user_query)
 
             history = ChatMessage.objects.filter(
             session=session
@@ -566,9 +566,30 @@ class RAGChatMessageView(APIView):
                 user_id=user.id,
             )
 
-            ai_text = result["answer"]
-            sources = result.get("sources", [])
-            followups = result.get("followups", [])
+            failure_status = {
+                PipelineOutcome.DEPENDENCY_UNAVAILABLE: status.HTTP_503_SERVICE_UNAVAILABLE,
+                PipelineOutcome.DEADLINE_EXCEEDED: status.HTTP_504_GATEWAY_TIMEOUT,
+                PipelineOutcome.RATE_LIMITED: status.HTTP_429_TOO_MANY_REQUESTS,
+            }.get(result.outcome)
+            if failure_status is not None:
+                logger.error("rag_chat_dependency_failed", extra={
+                    "event": "rag_chat_dependency_failed",
+                    "outcome": result.outcome.value,
+                    "user_id": str(user.id),
+                    "chapter_id": str(chapter_id),
+                    "session_id": str(session.id),
+                    "http_status": failure_status,
+                })
+                return Response(
+                    {"error": result.error, "retryable": True}, status=failure_status,
+                )
+            if result.outcome not in (PipelineOutcome.SUCCESS, PipelineOutcome.INSUFFICIENT_EVIDENCE):
+                raise ValueError("Unexpected pipeline outcome")
+
+            ai_text = result.answer
+            sources = result.sources
+            followups = result.followups
+            is_unanswered = result.outcome == PipelineOutcome.INSUFFICIENT_EVIDENCE
 
             # Enrich source chips with a human title (sync DB is fine here).
             doc_ids = [s["document_id"] for s in sources]
@@ -581,14 +602,17 @@ class RAGChatMessageView(APIView):
             for s in sources:
                 s["title"] = titles.get(s["document_id"], "Source")
 
-            # Save the AI's response
-            ai_message = ChatMessage.objects.create(
-                session=session,
-                sender='ai',
-                text=ai_text,
-                citations=sources,
-                suggestions=followups,
-            )
+            # Persist both sides together, only after a conversational result.
+            with transaction.atomic():
+                ChatMessage.objects.create(session=session, sender='user', text=user_query)
+                ai_message = ChatMessage.objects.create(
+                    session=session,
+                    sender='ai',
+                    text=ai_text,
+                    citations=sources,
+                    suggestions=followups,
+                    is_unanswered=is_unanswered,
+                )
 
             response_data = {
                 "id": str(ai_message.id),
@@ -596,8 +620,11 @@ class RAGChatMessageView(APIView):
                 "text": ai_message.text,
                 "sources": sources,
                 "followups": followups,
+                "is_unanswered": is_unanswered,
             }
-            return Response(response_data, status=status.HTTP_201_CREATED)
+            return Response(response_data, status=(
+                status.HTTP_200_OK if is_unanswered else status.HTTP_201_CREATED
+            ))
         
         except Document.DoesNotExist:
             return Response({"error": "Document not found for this chapter."}, status=status.HTTP_404_NOT_FOUND)

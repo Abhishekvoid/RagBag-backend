@@ -43,6 +43,49 @@ PINECONE_CLOUD = _clean_env("PINECONE_CLOUD") or "aws"
 PINECONE_REGION = _clean_env("PINECONE_REGION") or "us-east-1"
 EMBEDDING_DIM = int(_clean_env("EMBEDDING_DIM") or 384)
 
+# --- Hybrid retrieval (dense + learned-sparse, fused with RRF) ----------------
+#
+# The sparse half lives in its OWN index, and that is a constraint rather than a
+# preference. Pinecone only accepts sparse values inside a dense index when that
+# index's metric is `dotproduct`; ours is `cosine`, so co-locating them would
+# mean rebuilding and re-embedding the entire corpus. More importantly, a
+# single-index sparse-dense query returns ONE already-fused list, scored by
+# Pinecone's own internal weighting — there would be no second ranking left for
+# RRF to operate on. Two indexes, two rankings, fusion under our control.
+#
+# Why learned sparse and not BM25: BM25 ranks on IDF, which is a statistic of
+# the corpus. Every search here is hard-filtered to a single user's chapter
+# inside a multi-tenant index that grows on every upload, so there is no stable
+# corpus to compute IDF over — a fitted encoder is stale the moment anyone
+# uploads, and refitting means re-encoding everything. pinecone-sparse-english-v0
+# is a neural model with no corpus statistics to maintain, and it still gives us
+# the exact-term matching (acronyms, formula names, proper nouns) that a 384-dim
+# dense model reliably loses.
+PINECONE_SPARSE_INDEX = _clean_env("PINECONE_SPARSE_INDEX") or "studywise-documents-sparse"
+SPARSE_EMBED_MODEL = _clean_env("SPARSE_EMBED_MODEL") or "pinecone-sparse-english-v0"
+
+# Kill switch. Set HYBRID_SEARCH_ENABLED=false to fall back to dense-only
+# retrieval without a deploy — the pipeline already treats an absent sparse
+# ranking as a degraded-but-valid state, so this changes result quality and
+# nothing else.
+HYBRID_SEARCH_ENABLED = (_clean_env("HYBRID_SEARCH_ENABLED") or "true").lower() not in (
+    "false", "0", "no", "off",
+)
+
+# `input_type` is REQUIRED by this model and is not symmetric: passages and
+# queries are encoded differently, and sending the wrong one degrades retrieval
+# silently rather than erroring. Named here so neither call site can drift.
+SPARSE_INPUT_PASSAGE = "passage"
+SPARSE_INPUT_QUERY = "query"
+
+# Allowed values are 512 and 2048. Ingestion already splits every chunk to at
+# most 510 non-whitespace characters for the dense model, which is a proven
+# upper bound of 512 WordPiece tokens (see utils/token_budget), so 2048 puts
+# truncation structurally out of reach instead of relying on it not to trigger.
+# The model's default is 512 with truncate=END — silent truncation, the exact
+# failure mode token_budget exists to prevent.
+SPARSE_MAX_TOKENS_PER_SEQUENCE = 2048
+
 
 if OPENROUTER_API_KEY:
     logger.info("OPENROUTER_API_KEY loaded")
@@ -83,6 +126,43 @@ def get_pinecone_index():
 
     _index = pinecone_client.Index(PINECONE_INDEX)
     return _index
+
+
+_sparse_index = None
+
+
+def get_pinecone_sparse_index():
+    """Return the shared sparse index handle, creating the index on first use.
+
+    Mirrors get_pinecone_index() so both halves of retrieval have the same
+    lazy, idempotent, thread-safe lifecycle. A sparse index takes no
+    `dimension` — the vocabulary is unbounded — and MUST be dotproduct, which
+    is the only metric defined over sparse vectors.
+
+    Raises rather than returning None so the caller has to make an explicit
+    decision about degradation; rag_service catches this and falls back to
+    dense-only, which is the one place that policy belongs.
+    """
+    global _sparse_index
+    if _sparse_index is not None:
+        return _sparse_index
+
+    if pinecone_client is None:
+        raise RuntimeError("PINECONE_API_KEY is not set; cannot connect to Pinecone.")
+
+    if not pinecone_client.has_index(PINECONE_SPARSE_INDEX):
+        logger.info("Pinecone sparse index '%s' not found. Creating (%s/%s)...",
+                    PINECONE_SPARSE_INDEX, PINECONE_CLOUD, PINECONE_REGION)
+        pinecone_client.create_index(
+            name=PINECONE_SPARSE_INDEX,
+            metric="dotproduct",
+            vector_type="sparse",
+            spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
+        )
+        logger.info("Pinecone sparse index '%s' ready.", PINECONE_SPARSE_INDEX)
+
+    _sparse_index = pinecone_client.Index(PINECONE_SPARSE_INDEX)
+    return _sparse_index
 
 
 # OpenRouter speaks the OpenAI wire protocol, so the stock OpenAI SDK (already a
