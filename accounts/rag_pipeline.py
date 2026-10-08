@@ -5,6 +5,9 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 import httpx
 from openai import APITimeoutError
@@ -89,6 +92,33 @@ FINAL_CHUNKS = 8
 VALID_INTENTS = ("greeting", "summary", "ambiguous", "question")
 
 DEFAULT_INTENT = "question"
+
+
+class QueryExpansionPayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    queries: list[Annotated[str, StringConstraints(
+        strict=True, strip_whitespace=True, min_length=3, max_length=150,
+    )]] = Field(min_length=1, max_length=3)
+
+
+def validated_search_queries(raw: str, original: str, contextualized: str = "") -> list[str]:
+    """Always retain the validated input; at most three distinct alternatives."""
+    try:
+        payload = QueryExpansionPayload.model_validate_json(raw)
+    except (ValidationError, TypeError, ValueError):
+        logger.warning("Invalid query expansion; using the original question")
+        return [original]
+    queries = [original]
+    seen = {original.strip().casefold()}
+    for candidate in [contextualized, *payload.queries]:
+        candidate = candidate.strip()
+        key = candidate.casefold()
+        if 3 <= len(candidate) <= 150 and key not in seen and is_safe_to_embed(candidate):
+            queries.append(candidate)
+            seen.add(key)
+        if len(queries) == 4:
+            break
+    return queries
 
 CONTEXTUALIZE_AND_ROUTE_PROMPT = """You prepare a student's message for a study assistant.
 
@@ -306,7 +336,9 @@ class RagPipeline:
             elif intent == "ambiguous":
                 result =  _result("I'm not sure I understand. Could you clarify your question about this document?")
             else:
-                result = await self.handle_rag_search(refined_query, chapter_id, user_id, request_id)
+                result = await self.handle_rag_search(
+                    refined_query, chapter_id, user_id, request_id, original_query=user_query,
+                )
             
             status = result.outcome.value
             return result
@@ -537,7 +569,8 @@ class RagPipeline:
         expanded = completion.choices[0].message.content.strip().split("\n")
         return [q.strip("-• ") for q in expanded if q.strip()]
     
-    async def handle_rag_search(self, query: str, chapter_id: str, user_id: str, request_id=None):
+    async def handle_rag_search(self, query: str, chapter_id: str, user_id: str,
+                                request_id=None, *, original_query=None):
        
 
         logger.info(f"starting RAg search for chapter{chapter_id}, user {user_id}")
@@ -559,6 +592,7 @@ class RagPipeline:
     Return as JSON: {{"queries": ["query1", "query2", "query3"]}}
     """
     
+        original_query = original_query if original_query is not None else query
         try:
             async with latency_tracker.track_async("query_expansion"):
                 expansion_response = await ask_llm(
@@ -567,28 +601,19 @@ class RagPipeline:
                     model=LLM_MODEL,
                     json_mode = True,
                     temperature=0.2,
+                    max_tokens=800,
                 )
-                expansion_data = json.loads(expansion_response.choices[0].message.content)
-                expanded_queries = expansion_data.get("queries", [query])
+                all_queries = validated_search_queries(
+                    expansion_response.choices[0].message.content, original_query, query,
+                )
 
         except LLMUnavailable:
             logger.info(f"Query Expansion failed -> llm unavialable")
-            expanded_queries = [query]
+            all_queries = [original_query]
 
         except Exception as e:
             logger.error(f"Query expansion failed: {e}")
-            expanded_queries = [query]
-    
-        all_queries = [query] + expanded_queries
-
-        oversized = [q for q in all_queries if not is_safe_to_embed(q)]
-        if oversized:
-            logger.warning(
-                "dropping %d over-long expanded quer%s before embedding",
-                len(oversized),
-                "y" if len(oversized) == 1 else "ies",
-            )
-            all_queries = [q for q in all_queries if is_safe_to_embed(q)] or [query]
+            all_queries = [original_query]
 
         # ------------------------------------------------------------
         logger.info(f" Search queries: {all_queries}")
