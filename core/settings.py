@@ -10,6 +10,9 @@ from django.core.exceptions import ImproperlyConfigured
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+MAX_PAGES_PER_DOCUMENT = int(os.getenv("MAX_PAGES_PER_DOCUMENT", "200"))
+INGEST_VERIFY_TIMEOUT = float(os.getenv("INGEST_VERIFY_TIMEOUT", "60"))
+INDEX_VERSION_GRACE_SECONDS = int(os.getenv("INDEX_VERSION_GRACE_SECONDS", "3600"))
 
 
 ASGI_APPLICATION = "core.asgi.application"

@@ -84,6 +84,11 @@ class Document(models.Model):
     
     
     extracted_text = models.TextField(blank=True)
+    # Version 0 is the pre-versioning index, kept readable during rollout.
+    active_version = models.PositiveIntegerField(default=0)
+    pending_version = models.PositiveIntegerField(null=True, blank=True)
+    version_counter = models.PositiveIntegerField(default=0)
+    ingestion_token = models.CharField(max_length=32, blank=True)
 
     # --- NEW: Define status choices as constants ---
     STATUS_PENDING = 'PENDING'
@@ -114,6 +119,18 @@ class Document(models.Model):
         return f"{self.title} ({self.file_type})"
 
 
+class DocumentIndexVersion(models.Model):
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="index_versions")
+    version = models.PositiveIntegerField()
+    extracted_text = models.TextField(blank=True)
+    chunk_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["document", "version"], name="unique_document_index_version")]
+
+
 class DocumentPage(models.Model):
     """One page of a document's canonical, reader-facing text.
 
@@ -134,6 +151,7 @@ class DocumentPage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='pages')
     page_number = models.PositiveIntegerField()          # 1-indexed
+    version = models.PositiveIntegerField(default=0)
     image_url = models.TextField(blank=True)             # S3 url of the rendered original page
     reconstructed_md = models.TextField(blank=True)
     text_source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_LAYER)
@@ -141,7 +159,7 @@ class DocumentPage(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('document', 'page_number')
+        unique_together = ('document', 'version', 'page_number')
         ordering = ['page_number']
 
     def __str__(self):
