@@ -21,6 +21,7 @@ from django.db import transaction
 import json
 
 from .models import Document
+from .ingestion_versions import active_document_filter
 from .tasks import process_document_ingestion
 from utils.formatting import enforce_markdown_spacing
 import time
@@ -630,13 +631,12 @@ class RagPipeline:
         
         logger.info(f"Search scope → user_id={user_id}, chapter_id={chapter_id}")
 
-        search_filter = {
-            "user_id": {"$eq": str(user_id)},
-            "chapter_id": {"$eq": str(chapter_id)},
-        }
-
         logger.info("Searching vector database (hybrid + RRF...")
         try:
+            search_filter = await sync_to_async(active_document_filter)(user_id, chapter_id)
+            if search_filter is None:
+                return _result("This chapter has no searchable material yet.",
+                               outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE)
     
             async with latency_tracker.track_async("vector_search"):
                 flat_results = await hybrid_search(
@@ -650,13 +650,14 @@ class RagPipeline:
             if not flat_results:
                 logger.warning("Strict filter failed → fallback to user_id only")
 
-                fallback_filter = {"user_id": {"$eq": str(user_id)}}
-                flat_results = await hybrid_search(
-                    all_embeddings,
-                    query_text=query,
-                    filter=fallback_filter,
-                    limit_per_vector=15,
-                )
+                fallback_filter = await sync_to_async(active_document_filter)(user_id)
+                if fallback_filter is not None:
+                    flat_results = await hybrid_search(
+                        all_embeddings,
+                        query_text=query,
+                        filter=fallback_filter,
+                        limit_per_vector=15,
+                    )
 
       
 

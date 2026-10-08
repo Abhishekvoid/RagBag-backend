@@ -537,7 +537,7 @@ class RAGChatMessageView(APIView):
                     {"error": "Document not found for this chapter."},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            if document.status != Document.STATUS_COMPLETED:
+            if document.status != Document.STATUS_COMPLETED and not document.active_version:
                 error_msg = f"This document is not ready for chat. Current status: {document.status}."
                 if document.status == Document.STATUS_FAILED:
                     error_msg += f" Error details: {document.error_message}"
@@ -832,7 +832,7 @@ class DocumentContentView(APIView):
 
     def get(self, request, id):
         doc = get_object_or_404(Document, id=id, user=request.user)
-        if doc.status != Document.STATUS_COMPLETED:
+        if doc.status != Document.STATUS_COMPLETED and not doc.active_version:
             return Response(
                 {"error": "Document is not ready.", "status": doc.status},
                 status=status.HTTP_409_CONFLICT,
@@ -1051,7 +1051,7 @@ class DocumentPagesView(generics.ListAPIView):
 
     def get_queryset(self):
         doc = get_object_or_404(Document, id=self.kwargs["id"], user=self.request.user)
-        return doc.pages.all()
+        return doc.pages.filter(version=doc.active_version)
 
 
 class DocumentRescanView(APIView):

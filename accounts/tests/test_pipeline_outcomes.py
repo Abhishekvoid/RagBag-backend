@@ -185,3 +185,17 @@ class ChatPipelineOutcomeTests(APITestCase):
         self.assertEqual(response.data["text"], "Real answer")
         self.assertEqual(response.data["followups"], [])
 
+    def test_primary_and_fallback_searches_use_active_version_filters(self):
+        self.document.active_version = 4
+        self.document.pending_version = 5
+        self.document.save(update_fields=["active_version", "pending_version"])
+        self.dependencies["hybrid_search"].side_effect = [[], self.hits]
+        self.assertEqual(self.post_chat().status_code, 201)
+        calls = self.dependencies["hybrid_search"].call_args_list
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            scope = call.kwargs["filter"]["$and"]
+            self.assertEqual(scope[0], {"user_id": {"$eq": str(self.user.id)}})
+            self.assertEqual(scope[1]["$or"], [{"$and": [
+                {"document_id": {"$eq": str(self.document.id)}}, {"version": {"$eq": 4}},
+            ]}])

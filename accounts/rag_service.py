@@ -346,9 +346,7 @@ async def store_context(payload: dict, vector: List[float], id: str = None):
     logger.info("Stored context to Pinecone (maybe cache)")
 
 
-def make_chapter_user_filter(chapter_id: str, user_id: str) -> dict:
-    """Pinecone metadata filter matching a specific chapter and owner."""
-    return {
-        "chapter_id": {"$eq": str(chapter_id)},
-        "user_id": {"$eq": str(user_id)},
-    }
+def make_chapter_user_filter(chapter_id: str, user_id: str) -> Optional[dict]:
+    """Use from sync code; None means no active documents, never no filter."""
+    from .ingestion_versions import active_document_filter
+    return active_document_filter(user_id, chapter_id)

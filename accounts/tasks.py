@@ -3,6 +3,7 @@ import logging
 import tiktoken
 import io
 from celery import shared_task
+from celery.exceptions import Retry
 from django.conf import settings
 from django.core.files.storage import default_storage
 
@@ -10,9 +11,24 @@ import PyPDF2
 import docx
 from pptx import Presentation
 from dotenv import load_dotenv
-from .models import Document, Chapter
-from .ai_clients import get_pinecone_index, llm_client, LLM_MODEL
-from .page_pipeline import build_document_pages, canonical_text_for_document
+from .models import Document, Chapter, DocumentPage
+from .ingestion_versions import (
+    document_lease, reserve_version, activate_version, fail_version,
+    verify_vectors, version_prefix, LeaseLost,
+)
+from .ai_clients import (
+    get_pinecone_index,
+    get_pinecone_sparse_index,
+    llm_client,
+    LLM_MODEL,
+    HYBRID_SEARCH_ENABLED,
+    SPARSE_INPUT_PASSAGE,
+    pinecone_client,
+    PINECONE_SPARSE_INDEX,
+)
+from .rag_service import embed_sparse
+from .page_pipeline import build_document_pages, canonical_text_for_document, DocumentOversizedError
+from .vision_ocr import strip_uncertainty_markers
 from .realtime import (
     push_ingestion_status,
     PHASE_READING, PHASE_NAMING, PHASE_CHUNKING,
@@ -24,6 +40,7 @@ import pytesseract
 from pdf2image import convert_from_bytes
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.db import close_old_connections, transaction
 import uuid
 
 
@@ -133,23 +150,45 @@ def chunk_text_by_token(text, tokenizer, chunk_size=200, chunk_overlap=50):
         start += chunk_size - chunk_overlap
     return chunks
 
-def _delete_document_vectors(index, document_id, correlation_id=""):
-    """Remove every vector belonging to one document.
+def _sparse_index_or_none(correlation_id=""):
+    """The sparse index handle, or None when hybrid is off or unreachable.
 
-    Vectors are located by the ``<doc_id>#`` id prefix set at ingestion — a
-    Pinecone serverless index cannot delete by metadata filter, so the prefix is
-    the only handle there is. Shared by ingestion (to stay idempotent across
-    retries) and cleanup_document_data (to tidy up after a delete).
+    Returning None rather than raising keeps the sparse half strictly optional
+    at ingestion: a document that lands in the dense index but not the sparse
+    one is still fully answerable, and shows up as `sparse_empty` at query time
+    rather than as a failed upload.
     """
+    if not HYBRID_SEARCH_ENABLED:
+        return None
+    try:
+        return get_pinecone_sparse_index()
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] sparse index unavailable: {e}")
+        return None
+
+
+def _delete_document_vectors(index, document_id, correlation_id=""):
+    """Delete legacy prefixed IDs. Full deletion also removes all other versions."""
     if index is None:
         return 0
 
     removed = 0
     try:
         for id_page in index.list(prefix=f"{document_id}#"):
-            if id_page:
-                index.delete(ids=id_page)
-                removed += len(id_page)
+            # `index.list()` does NOT yield plain id strings. On pinecone 9.x a
+            # page is a ListResponse wrapping ListItem objects, and handing that
+            # straight to delete() raises "Type is not JSON serializable:
+            # ListResponse" — inside the try below, where it was swallowed as a
+            # warning. The purge therefore never deleted anything, silently, for
+            # every re-ingest and every document deletion: orphaned vectors
+            # stayed queryable and kept being fused into answers.
+            #
+            # Both shapes are accepted because the SDK has returned bare strings
+            # in the past and the cost of tolerating that is one getattr.
+            ids = [getattr(item, "id", item) for item in (id_page or [])]
+            if ids:
+                index.delete(ids=ids)
+                removed += len(ids)
     except Exception as e:
         logger.warning(
             f"[{correlation_id}] could not clear existing vectors for "
@@ -162,15 +201,48 @@ def _delete_document_vectors(index, document_id, correlation_id=""):
     return removed
 
 
-def extract_document_text(doc):
+def _sparse_index_for_cleanup():
+    """Cleanup must reach an existing sparse index even when hybrid is disabled.
+
+    Do not use the ingestion getter: it creates a missing index, which cleanup
+    should never do. A service failure propagates so retired versions stay queued.
+    """
+    if pinecone_client is None:
+        raise RuntimeError("Pinecone is not configured")
+    if not pinecone_client.has_index(PINECONE_SPARSE_INDEX):
+        return None
+    return pinecone_client.Index(PINECONE_SPARSE_INDEX)
+
+
+def _purge_document_vectors(dense_index, document_id, correlation_id=""):
+    """Deletion only: remove legacy IDs and every version from BOTH indexes."""
+    removed = 0
+    try:
+        sparse_index = _sparse_index_for_cleanup()
+    except Exception:
+        logger.warning("Sparse document deletion unavailable", exc_info=True)
+        sparse_index = None
+    for index in (dense_index, sparse_index):
+        if index is None:
+            continue
+        removed += _delete_document_vectors(index, document_id, correlation_id)
+        try:
+            # Metadata deletion also catches pre-prefix UUIDs and new version IDs.
+            index.delete(filter={"document_id": {"$eq": str(document_id)}})
+        except Exception:
+            logger.warning("Could not purge all document versions: %s", document_id, exc_info=True)
+    return removed
+
+
+def extract_document_text(doc, *, version=None, check_lease=lambda: None):
     """PDF -> page pipeline (vision/layer canonical text); other types -> legacy extractor."""
     if doc.file_type == "pdf":
-        build_document_pages(doc)
-        return canonical_text_for_document(doc)
+        build_document_pages(doc, version=version, check_lease=check_lease)
+        return canonical_text_for_document(doc, version=version)
     return get_text_from_file(doc.file.name, doc.file_type)
 
 
-def build_chunk_metadata(document, chunk, page_number=None):
+def build_chunk_metadata(document, chunk, page_number=None, *, version=None):
     metadata = {
         "text": chunk,
         "document_id": str(document.id),
@@ -181,6 +253,8 @@ def build_chunk_metadata(document, chunk, page_number=None):
         metadata["chapter_id"] = str(document.chapter_id)
     if page_number is not None:
         metadata["page_number"] = page_number
+    if version is not None:
+        metadata["version"] = version
     return metadata
 
 
@@ -197,309 +271,242 @@ def _page_for_chunk(chunk, pages):
     return None
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def create_chapter_from_document(self, document_id: str):
-    logger.info(f"[{document_id}] TASK STARTED: create_chapter_from_document")
-    
+def _version_chunks(doc, text, tokenizer, version):
+    """Chunk actual page text, so IDs never depend on a substring page guess."""
+    pages = list(doc.pages.filter(version=version))
+    sources = [(p.page_number, strip_uncertainty_markers(p.reconstructed_md)) for p in pages]
+    if not sources:
+        sources = [(0, text)]
+    prepared = []
+    for page_number, content in sources:
+        pieces = [piece for chunk in chunk_text_by_token(content, tokenizer)
+                  if len(chunk.strip()) > 10
+                  for piece in split_for_embedding(chunk.strip())]
+        for position, piece in enumerate(pieces):
+            prepared.append((f"{version_prefix(doc.id, version)}p{page_number}_c{position}",
+                             page_number, piece))
+        if len(prepared) > MAX_CHUNKS_PER_DOCUMENT:
+            raise DocumentOversizedError(f"Document exceeds the {MAX_CHUNKS_PER_DOCUMENT}-chunk limit.")
+    if not prepared:
+        raise ValueError("No readable chunks available for ingestion")
+    return prepared
+
+
+def _queue_version_cleanup(document_id):
     try:
-        doc = Document.objects.get(id=document_id)
-        logger.info(f"[{document_id}] Document found. Setting status to PROCESSING.")
-        
-        # --- NEW: Set status to PROCESSING immediately ---
-        doc.status = Document.STATUS_PROCESSING
-        doc.save(update_fields=['status'])
-        push_ingestion_status(doc.user.id, doc.id, PHASE_READING)
-
-        _, _, llm = _get_clients()
-
-
-        
-        if not doc.extracted_text:
-            logger.info(f"[{document_id}] Extracting text from file: {doc.file.name}")
-            document_text = extract_document_text(doc)
-
-            if not document_text:
-                raise ValueError("No text could be extracted from the document.")
-
-            doc.extracted_text = document_text
-            doc.save(update_fields=["extracted_text"])
-        else:
-            logger.info(f"[{document_id}] Using cached extracted text")
-            document_text = doc.extracted_text
-
-       
-        logger.info(f"[{document_id}] Text extracted successfully. Length: {len(document_text)} characters.")
-
-        prompt = f"Based on the following text, create a short, descriptive title (4-5 words max) for a new chapter. Do not use quotes.\n\nTEXT:\n{document_text[:4000]}\n\nTITLE:"
-        
-        logger.info(f"[{document_id}] Generating chapter title with {LLM_MODEL}...")
-        chat_completion = llm.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=LLM_MODEL,
-            # Reasoning model: leave room for hidden reasoning tokens, otherwise
-            # the budget is spent before the 4-5 word title is emitted.
-            max_tokens=1000,
+        prune_document_versions.apply_async(
+            args=[str(document_id)], countdown=settings.INDEX_VERSION_GRACE_SECONDS,
         )
-        title_content = chat_completion.choices[0].message.content
-        if not title_content:
-            raise ValueError(f"{LLM_MODEL} returned an empty chapter title")
-        ai_generated_title = title_content.strip().strip('"')
-        logger.info(f"[{document_id}] Generated title: '{ai_generated_title}'")
+    except Exception:
+        logger.exception("Could not queue version cleanup; run prune_index_versions to recover")
 
-        new_chapter = Chapter.objects.create(user=doc.user, name=ai_generated_title)
-        logger.info(f"[{document_id}] New chapter created with ID: {new_chapter.id}")
 
-        doc.chapter = new_chapter
-        doc.title = ai_generated_title
-        doc.save()
-        logger.info(f"[{document_id}] Document updated with new chapter and title.")
-        push_ingestion_status(
-            doc.user.id, doc.id, PHASE_NAMING,
-            chapter_id=new_chapter.id, title=ai_generated_title,
-        )
+@shared_task
+def create_chapter_from_document(document_id):
+    # All extraction, naming, and indexing mutations now share the same lease.
+    process_document_ingestion.delay(str(document_id))
 
-        # --- NEW: Send a success notification ---
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{doc.user.id}",
-            {"type": "send_notification", "message": "notebook_updated"}
-        )
-        logger.info(f"[{document_id}] Notification 'notebook_updated' sent.")
-
-        # Trigger the ingestion task with the document ID
-        logger.info(f"[{document_id}] Triggering 'process_document_ingestion' task...")
-        process_document_ingestion.delay(str(doc.id))
-        logger.info(f"[{document_id}] TASK FINISHED: create_chapter_from_document (ingestion triggered).")
-
-    except Document.DoesNotExist:
-        logger.error(f"[{document_id}] TASK FAILED: Document not found.")
-    except Exception as e:
-        logger.error(f"[{document_id}] TASK FAILED: Chapter creation or ingestion trigger failed: {e}", exc_info=True)
-        # --- NEW: On failure, update status and save error ---
-        try:
-            doc = Document.objects.get(id=document_id)
-            doc.status = Document.STATUS_FAILED
-            doc.error_message = str(e)
-            doc.save(update_fields=['status', 'error_message'])
-            push_ingestion_status(
-                doc.user.id, doc.id, PHASE_FAILED, error=str(e))
-        except Exception:
-            pass # If doc doesn't exist, we can't update it
-
-        # You can optionally send a failure notification here
-        # ...
-        raise self.retry(exc=e)
 
 @shared_task
 def process_document_for_existing_chapter(document_id, chapter_id):
-    logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] TASK STARTED: process_document_for_existing_chapter")
-    try:
-        document = Document.objects.get(id=document_id)
-        chapter = Chapter.objects.get(id=chapter_id)
-        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Document and Chapter found.")
+    process_document_ingestion.delay(str(document_id), chapter_id=str(chapter_id))
 
 
-        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Extracting text from file: {document.file.name}")
-        extracted_text = extract_document_text(document)
-        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] Text extracted. Length: {len(extracted_text)} characters.")
-
-        document.extracted_text = extracted_text
-        document.status = Document.STATUS_PROCESSING
-        document.save(update_fields=['extracted_text', 'status'])
-
-        logger.info("Text extracted, triggering ingestion...")
-        logger.info("Text extracted, triggering ingestion...")
-        process_document_ingestion.delay(str(document.id))
-
-        logger.info(f"[Doc: {document_id}, Chap: {chapter_id}] TASK FINISHED: process_document_for_existing_chapter")
-
-    except Document.DoesNotExist:
-        logger.error(f"process_document_for_existing_chapter: Document {document_id} not found.")
-    except Chapter.DoesNotExist:
-        logger.error(f"process_document_for_existing_chapter: Chapter {chapter_id} not found.")
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        Document.objects.filter(id=document_id).update(
-            status=Document.STATUS_FAILED,
-            error_message=str(e)
-        )
-# ----- CORRECTED DOCUMENT PROCESSING TASK --------
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def process_document_ingestion(self, document_id: str):
-    correlation_id = str(uuid.uuid4())[:8]
-    logger.info(f"[{correlation_id}] Starting document ingestion for RAG...")
-    
-    doc = Document.objects.get(id=document_id)
-    
+def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_id=None):
+    close_old_connections()
+    doc = revision = lease = None
     try:
-        vector_index, tokenizer, _ = _get_clients()
-        
-        if not doc.extracted_text:
-            logger.info(f"[{document_id}] Extracting text for ingestion...")
-            doc.extracted_text = extract_document_text(doc)
-            doc.save(update_fields=['extracted_text'])
+        with document_lease(document_id) as lease:
+            if lease is None:
+                logger.info("Duplicate ingestion skipped for document %s", document_id)
+                return {"status": "skipped", "reason": "ingestion_in_progress"}
+            doc, revision = reserve_version(document_id, lease)
+            vector_index, tokenizer, llm = _get_clients()
+            push_ingestion_status(doc.user_id, doc.id, PHASE_READING)
+            if rescan or not doc.extracted_text:
+                text = extract_document_text(doc, version=revision.version, check_lease=lease.check)
+            else:
+                text = doc.extracted_text
+                # Reindex cached text without exposing pending pages to readers.
+                DocumentPage.objects.bulk_create([
+                    DocumentPage(document=doc, version=revision.version,
+                                 page_number=p.page_number, image_url=p.image_url,
+                                 reconstructed_md=p.reconstructed_md, text_source=p.text_source)
+                    for p in doc.pages.filter(version=doc.active_version)
+                ])
+            if not text.strip():
+                raise ValueError("No text available for ingestion")
+            revision.extracted_text = text
+            revision.save(update_fields=["extracted_text"])
 
-        if not doc.extracted_text.strip():
-            raise ValueError("No text available for ingestion.")
+            if chapter_id is not None or doc.chapter_id is None:
+                if chapter_id is not None:
+                    chapter = Chapter.objects.get(id=chapter_id, user_id=doc.user_id)
+                    title = doc.title
+                else:
+                    completion = llm.chat.completions.create(
+                        model=LLM_MODEL, max_tokens=1000,
+                        messages=[{"role": "user", "content":
+                                   "Give this study material a short title (4-5 words), without quotes:\n" + text[:4000]}],
+                    )
+                    title = (completion.choices[0].message.content or "").strip().strip('"')
+                    if not title:
+                        raise ValueError("Chapter title generation returned no text")
+                    chapter = None
+                with transaction.atomic():
+                    current = Document.objects.select_for_update().get(id=doc.id)
+                    lease.check()
+                    if current.ingestion_token != lease.token:
+                        raise LeaseLost("A newer ingestion owns this document")
+                    if chapter is None:
+                        chapter = Chapter.objects.create(user_id=doc.user_id, name=title)
+                    current.chapter = chapter
+                    current.title = title
+                    current.save(update_fields=["chapter", "title"])
+                doc.chapter = chapter
+                doc.title = title
+                push_ingestion_status(doc.user_id, doc.id, PHASE_NAMING,
+                                      chapter_id=chapter.id, title=title)
 
-        
-        # Ingestion must be idempotent, because it is now genuinely re-run: a
-        # failed batch raises below, Celery retries up to 3 times, and
-        # rescan_document_with_vision re-ingests outright. Point ids embed a
-        # fresh uuid4 each pass, so without this every retry would layer another
-        # copy of the document into the index — inflating retrieval with
-        # duplicates of itself. Best-effort: a purge failure is worth a warning,
-        # not a lost document.
-        _delete_document_vectors(vector_index, document_id, correlation_id)
-
-        embedding_client = EmbeddingClient()
-        pages = list(doc.pages.all())   # for per-chunk page tagging (may be empty for non-PDF)
-        text_chunks = chunk_text_by_token(doc.extracted_text, tokenizer)
-        text_chunks = text_chunks[:MAX_CHUNKS_PER_DOCUMENT]
-
-        logger.info(f"[{document_id}] Generated {len(text_chunks)} chunks")
-
-        if not text_chunks:
-            raise ValueError("Text could not be split into chunks.")
-
-        BATCH = 16
-
-        total_batches = max(1, (len(text_chunks) + BATCH - 1) // BATCH)
-        push_ingestion_status(doc.user.id, doc.id, PHASE_CHUNKING,
-                              total_batches=total_batches)
-
-        MIN_CHUNK_LEN = 10
-
-        # Pinecone serverless indexes are created lazily by get_pinecone_index()
-        # and index all metadata fields automatically — no collection/payload-index
-        # setup needed here.
-
-        all_inserted = 0
-        failed_batches = []
-        for i in range(0, len(text_chunks), BATCH):
-
-            chunk_batch = text_chunks[i:i + BATCH]
-            chunk_batch = [c.strip() for c in chunk_batch if len(c.strip()) > MIN_CHUNK_LEN]
-
-            if not chunk_batch:
-                logger.warning(f"[{correlation_id}] Empty batch at index {i}")
-                continue
-
-            # SPLIT oversized chunks — never truncate them.
-            #
-            # chunk_text_by_token counts cl100k tokens, which bounds nothing on
-            # the WordPiece side: a chunk of horizontal rules is 21 tiktoken
-            # tokens and 792 bge tokens. This used to be `c[:800]`, which was
-            # both insufficient (800 characters of punctuation is still ~800 bge
-            # tokens) and lossy (anything past 800 characters was dropped on the
-            # floor, with no log and no failure). Splitting keeps every character
-            # and gives the model pieces it can actually read.
-            chunk_batch = [
-                piece
-                for c in chunk_batch
-                for piece in split_for_embedding(c)
-            ]
-
-            logger.info(f"[{correlation_id}] Embedding batch {i//BATCH + 1}/{(len(text_chunks)-1)//BATCH + 1} ({len(chunk_batch)} chunks)")
-            push_ingestion_status(
-                doc.user.id, doc.id, PHASE_EMBEDDING,
-                batch=i // BATCH + 1, total_batches=total_batches,
-            )
-
-
+            chunks = _version_chunks(doc, text, tokenizer, revision.version)
+            revision.chunk_count = len(chunks)
+            revision.save(update_fields=["chunk_count"])
+            embedding_client = EmbeddingClient()
+            sparse_index = _sparse_index_or_none()
+            batch_size = 16
+            total_batches = (len(chunks) + batch_size - 1) // batch_size
+            push_ingestion_status(doc.user_id, doc.id, PHASE_CHUNKING, total_batches=total_batches)
+            probe_vector = None
+            for offset in range(0, len(chunks), batch_size):
+                lease.check()
+                batch = chunks[offset:offset + batch_size]
+                texts = [chunk for _, _, chunk in batch]
+                batch_number = offset // batch_size + 1
+                push_ingestion_status(doc.user_id, doc.id, PHASE_EMBEDDING,
+                                      batch=batch_number, total_batches=total_batches)
+                try:
+                    embeddings = async_to_sync(embedding_client.embed_texts)(texts)
+                    if len(embeddings) != len(batch):
+                        raise ValueError("Embedding provider returned an incomplete batch")
+                    lease.check()
+                    points = [{"id": point_id, "values": vector,
+                               "metadata": build_chunk_metadata(doc, chunk, page_number=page,
+                                                                version=revision.version)}
+                              for (point_id, page, chunk), vector in zip(batch, embeddings)]
+                    vector_index.upsert(vectors=points)
+                    probe_vector = embeddings[0]
+                except LeaseLost:
+                    raise
+                except Exception as exc:
+                    raise RuntimeError(f"Embedding/index batch {batch_number} failed: {exc}") from exc
+                if sparse_index is not None:
+                    try:
+                        sparse_vectors = async_to_sync(embed_sparse)(texts, input_type=SPARSE_INPUT_PASSAGE)
+                        if len(sparse_vectors) != len(batch):
+                            raise ValueError("Sparse provider returned an incomplete batch")
+                        lease.check()
+                        points = [{"id": point_id, "sparse_values": sparse,
+                                   "metadata": build_chunk_metadata(doc, chunk, page_number=page,
+                                                                    version=revision.version)}
+                                  for (point_id, page, chunk), sparse in zip(batch, sparse_vectors)
+                                  if sparse["indices"]]
+                        if points:
+                            sparse_index.upsert(vectors=points)
+                    except LeaseLost:
+                        raise
+                    except Exception:
+                        logger.warning("Sparse batch unavailable; new version remains dense-capable", exc_info=True)
+            lease.check()
+            verify_vectors(vector_index, [key for key, _, _ in chunks], doc.id,
+                           revision.version, lease, probe_vector=probe_vector)
+            push_ingestion_status(doc.user_id, doc.id, PHASE_STORING)
+            activate_version(doc.id, revision, lease)
+    except Document.DoesNotExist:
+        logger.info("Document %s no longer exists; ingestion stopped", document_id)
+        return {"status": "deleted"}
+    except Exception as exc:
+        logger.exception("Document ingestion failed: %s", document_id)
+        if revision is not None:
             try:
-                embeddings = async_to_sync(embedding_client.embed_texts)(chunk_batch)
-            except Exception as e:
-                # Carry on through the remaining batches so one bad batch does
-                # not cost the whole document's progress, but REMEMBER it. The
-                # check after the loop is what stops this from ending as a
-                # "ready" document that is quietly missing vectors.
-                logger.error(f"Embedding batch failed: {e}")
-                failed_batches.append((i // BATCH + 1, f"{type(e).__name__}: {e}"))
-                continue
-            points = []
+                fail_version(document_id, revision, lease, exc)
+                _queue_version_cleanup(document_id)
+            except Exception:
+                logger.exception("Could not record ingestion failure")
+        if doc is not None:
+            # A failed rebuild does not turn the active document into a failed upload.
+            if doc.status != Document.STATUS_COMPLETED and not doc.active_version:
+                push_ingestion_status(doc.user_id, doc.id, PHASE_FAILED, error=str(exc))
+        if isinstance(exc, (DocumentOversizedError, LeaseLost)):
+            raise
+        raise self.retry(exc=exc)
 
-            logger.info(f"Embedding batch {i//BATCH + 1} ({len(chunk_batch)} chunks)")
-            for chunk, vector in zip(chunk_batch, embeddings):
+    _queue_version_cleanup(document_id)
+    push_ingestion_status(doc.user_id, doc.id, PHASE_READY,
+                          chapter_id=doc.chapter_id, title=doc.title)
+    # Notification/broker failures must never retry an already published version.
+    try:
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(f"user_{doc.user_id}", {
+            "type": "send_notification", "message": "document_ready", "document_id": str(doc.id),
+        })
+    except Exception:
+        logger.warning("Document ready notification failed", exc_info=True)
+    return {"status": "completed", "version": revision.version}
 
-                metadata = build_chunk_metadata(
-                    doc, chunk, page_number=_page_for_chunk(chunk, pages))
 
-                # Prefix the point id with the document id so a document's
-                # vectors can be located later via list-by-prefix. This is the
-                # only way to delete vectors on a Pinecone serverless index,
-                # which does not support delete-by-metadata-filter.
-                points.append({
-                    "id": f"{document_id}#{uuid.uuid4()}",
-                    "values": vector,
-                    "metadata": metadata,
-                })
+@shared_task
+def rescan_document_with_vision(document_id):
+    process_document_ingestion.delay(str(document_id), rescan=True)
 
-            all_inserted += len(points)
-            vector_index.upsert(vectors=points)
-            
-        
-            
-        # A document with missing vectors is worse than a failed one: it answers
-        # questions, and answers them from an incomplete index, with no signal to
-        # the user that anything is wrong. Fail the task instead so it retries,
-        # and so the status the user sees matches what is actually searchable.
-        if failed_batches:
-            raise RuntimeError(
-                f"{len(failed_batches)} of {total_batches} embedding batches "
-                f"failed; the document would be indexed with missing vectors. "
-                f"First failure — batch {failed_batches[0][0]}: {failed_batches[0][1]}"
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def prune_document_versions(self, document_id):
+    from datetime import timedelta
+    from django.utils import timezone
+    cutoff = timezone.now() - timedelta(seconds=settings.INDEX_VERSION_GRACE_SECONDS)
+    try:
+        with document_lease(document_id) as lease:
+            if lease is None:
+                raise self.retry(countdown=60)
+            doc = Document.objects.filter(id=document_id).first()
+            if doc is None:
+                return
+            versions = doc.index_versions.filter(retired_at__lte=cutoff).exclude(
+                version=doc.active_version,
             )
-
-        push_ingestion_status(doc.user.id, doc.id, PHASE_STORING)
-
-        # --- NEW: On success, mark as COMPLETED ---
-        doc.status = Document.STATUS_COMPLETED
-        doc.error_message = None  # Clear any previous errors
-        doc.save(update_fields=['status', 'error_message'])
-
-        logger.info(f"[{document_id}] Ingestion successful.")
-        push_ingestion_status(
-            doc.user.id, doc.id, PHASE_READY,
-            chapter_id=(doc.chapter.id if doc.chapter else None),
-            title=(doc.chapter.name if doc.chapter else doc.title),
-        )
-
-        # --- NEW: Send a success notification ---
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{doc.user.id}",
-            {"type": "send_notification", "message": "document_ready", "document_id": str(doc.id)}
-        )
-
-    except Exception as e:
-        logger.error(f"[{document_id}] Ingestion failed: {e}", exc_info=True)
-        # --- NEW: On failure, update status and save error ---
-        doc.status = Document.STATUS_FAILED
-        doc.error_message = str(e)
-        doc.save(update_fields=['status', 'error_message'])
-        push_ingestion_status(doc.user.id, doc.id, PHASE_FAILED, error=str(e))
-
-        # --- NEW: Send a failure notification ---
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{doc.user.id}",
-            {"type": "send_notification", "message": "document_failed", "document_id": str(doc.id)}
-        )
-        raise self.retry(exc=e)
-
-
-@shared_task(bind=True, max_retries=2, default_retry_delay=30)
-def rescan_document_with_vision(self, document_id: str):
-    """Regenerate a document's pages via the vision pipeline and re-embed.
-    Existing highlights re-anchor via quoted_text after the text changes."""
-    doc = Document.objects.get(id=document_id)
-    doc.status = Document.STATUS_PROCESSING
-    doc.save(update_fields=["status"])
-    doc.pages.all().delete()
-    doc.extracted_text = extract_document_text(doc)
-    doc.save(update_fields=["extracted_text"])
-    process_document_ingestion.delay(str(doc.id))
+            if doc.pending_version is not None:
+                versions = versions.exclude(version=doc.pending_version)
+            if not versions.exists():
+                return
+            # Cleanup is strict: losing an index connection retains the DB record
+            # so a later task/maintenance command can finish the same work.
+            dense = get_pinecone_index()
+            sparse = _sparse_index_for_cleanup()
+            for revision in versions:
+                lease.check()
+                for index in (dense, sparse):
+                    if index is None:
+                        continue
+                    if revision.version == 0:
+                        index.delete(filter={"$and": [
+                            {"document_id": {"$eq": str(doc.id)}},
+                            {"user_id": {"$eq": str(doc.user_id)}},
+                            {"version": {"$exists": False}},
+                        ]})
+                    else:
+                        for page in index.list(prefix=version_prefix(doc.id, revision.version)):
+                            lease.check()
+                            ids = [getattr(item, "id", item) for item in page]
+                            if ids:
+                                index.delete(ids=ids)
+                lease.check()
+                doc.pages.filter(version=revision.version).delete()
+                revision.delete()
+    except Retry:
+        raise
+    except Exception as exc:
+        raise self.retry(exc=exc)
 
 
 @shared_task
@@ -522,7 +529,7 @@ def cleanup_document_data(document_ids, file_names):
 
         if index is not None:
             for document_id in document_ids:
-                _delete_document_vectors(index, document_id, "cleanup")
+                _purge_document_vectors(index, document_id, "cleanup")
 
     for name in file_names:
         if not name:
