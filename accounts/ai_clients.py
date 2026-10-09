@@ -2,7 +2,9 @@ import os
 from dotenv import load_dotenv
 import logging
 from openai import OpenAI, AsyncOpenAI
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone, AsyncPinecone, ServerlessSpec, RetryConfig
+from contextlib import asynccontextmanager
+from utils.deadline import current_deadline, timeout_for
 
 load_dotenv()
 
@@ -94,7 +96,45 @@ else:
 
 
 # Pinecone client is cheap to construct and does no network I/O until used.
-pinecone_client = Pinecone(api_key=PINECONE_API_KEY) if PINECONE_API_KEY else None
+pinecone_client = (
+    Pinecone(api_key=PINECONE_API_KEY, timeout=10, retry_config=RetryConfig(max_retries=0))
+    if PINECONE_API_KEY else None
+)
+
+
+def pinecone_call(method, *args, **kwargs):
+    """SDK control/inference methods lack per-call timeouts in Pinecone 9.
+
+    A temporary client gives each call the remaining budget without mutating
+    the shared client used by concurrent requests. Index query/upsert methods
+    accept their own timeout and continue to reuse the shared connection pool.
+    """
+    if not current_deadline():
+        target = pinecone_client
+        for part in method.split("."):
+            target = getattr(target, part)
+        return target(*args, **kwargs)
+    with Pinecone(api_key=PINECONE_API_KEY, timeout=timeout_for(10),
+                  retry_config=RetryConfig(max_retries=0)) as client:
+        target = client
+        for part in method.split("."):
+            target = getattr(target, part)
+        return target(*args, **kwargs)
+
+
+def async_pinecone_client():
+    return AsyncPinecone(api_key=PINECONE_API_KEY, timeout=timeout_for(10),
+                         retry_config=RetryConfig(max_retries=0))
+
+
+@asynccontextmanager
+async def query_index(name):
+    # Native async I/O is cancellable; a timed-out to_thread query would keep
+    # async_to_sync waiting for its executor thread to finish on loop shutdown.
+    async with async_pinecone_client() as client:
+        index = await client.index(name=name)
+        async with index:
+            yield index
 
 _index = None
 
@@ -113,18 +153,23 @@ def get_pinecone_index():
     if pinecone_client is None:
         raise RuntimeError("PINECONE_API_KEY is not set; cannot connect to Pinecone.")
 
-    if not pinecone_client.has_index(PINECONE_INDEX):
+    if not pinecone_call("has_index", PINECONE_INDEX):
         logger.info("Pinecone index '%s' not found. Creating (%s/%s, dim=%d)...",
                     PINECONE_INDEX, PINECONE_CLOUD, PINECONE_REGION, EMBEDDING_DIM)
-        pinecone_client.create_index(
+        pinecone_call("create_index",
             name=PINECONE_INDEX,
             dimension=EMBEDDING_DIM,
             metric="cosine",
             spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
+            timeout=-1,
         )
         logger.info("Pinecone index '%s' ready.", PINECONE_INDEX)
 
-    _index = pinecone_client.Index(PINECONE_INDEX)
+    if current_deadline():
+        description = pinecone_call("describe_index", PINECONE_INDEX)
+        _index = pinecone_client.Index(host=description.host)
+    else:
+        _index = pinecone_client.Index(PINECONE_INDEX)
     return _index
 
 
@@ -150,18 +195,23 @@ def get_pinecone_sparse_index():
     if pinecone_client is None:
         raise RuntimeError("PINECONE_API_KEY is not set; cannot connect to Pinecone.")
 
-    if not pinecone_client.has_index(PINECONE_SPARSE_INDEX):
+    if not pinecone_call("has_index", PINECONE_SPARSE_INDEX):
         logger.info("Pinecone sparse index '%s' not found. Creating (%s/%s)...",
                     PINECONE_SPARSE_INDEX, PINECONE_CLOUD, PINECONE_REGION)
-        pinecone_client.create_index(
+        pinecone_call("create_index",
             name=PINECONE_SPARSE_INDEX,
             metric="dotproduct",
             vector_type="sparse",
             spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
+            timeout=-1,
         )
         logger.info("Pinecone sparse index '%s' ready.", PINECONE_SPARSE_INDEX)
 
-    _sparse_index = pinecone_client.Index(PINECONE_SPARSE_INDEX)
+    if current_deadline():
+        description = pinecone_call("describe_index", PINECONE_SPARSE_INDEX)
+        _sparse_index = pinecone_client.Index(host=description.host)
+    else:
+        _sparse_index = pinecone_client.Index(PINECONE_SPARSE_INDEX)
     return _sparse_index
 
 
@@ -171,10 +221,10 @@ def get_pinecone_sparse_index():
 # The rest of the app codes against llm_client / async_llm_client rather than
 # these names, so swapping providers stays a one-file change.
 llm_client = (
-    OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+    OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL, max_retries=0, timeout=45)
     if OPENROUTER_API_KEY else None
 )
 async_llm_client = (
-    AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+    AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL, max_retries=0, timeout=45)
     if OPENROUTER_API_KEY else None
 )

@@ -12,6 +12,7 @@ import os
 import re
 import base64
 import logging
+from utils.deadline import DeadlineExceeded, timeout_for
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def _get_client():
         raise VisionUnavailable("vision client previously failed to initialize")
     try:
         from openai import OpenAI
-        _client = OpenAI(base_url=VISION_BASE_URL, api_key=VISION_API_KEY)
+        _client = OpenAI(base_url=VISION_BASE_URL, api_key=VISION_API_KEY, max_retries=0, timeout=60)
         return _client
     except Exception as e:  # missing sdk / bad config
         _client_failed = True
@@ -98,6 +99,7 @@ def reconstruct_page_markdown(image_png_bytes: bytes, *, page_number: int) -> st
     b64 = base64.standard_b64encode(image_png_bytes).decode("utf-8")
     try:
         resp = client.chat.completions.create(
+            timeout=timeout_for(60),
             model=VISION_MODEL,
             temperature=0,
             max_tokens=4096,
@@ -111,6 +113,8 @@ def reconstruct_page_markdown(image_png_bytes: bytes, *, page_number: int) -> st
                 ]},
             ],
         )
+    except DeadlineExceeded:
+        raise
     except Exception as e:
         logger.error("vision reconstruct failed (page %s): %s", page_number, e)
         raise VisionUnavailable(str(e))

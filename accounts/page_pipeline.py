@@ -1,6 +1,5 @@
 """A document's file -> persisted, page-structured canonical text."""
 import logging
-import shutil
 import tempfile
 import uuid
 from contextlib import closing
@@ -13,6 +12,7 @@ from django.core.files.base import ContentFile
 import fitz  # PyMuPDF — renders pages to images with no external binary (unlike poppler)
 
 from .models import Document, DocumentPage
+from utils.deadline import check_deadline
 from .vision_ocr import (
     VISION_ENABLED, VISION_MAX_PAGES,
     page_needs_vision, reconstruct_page_markdown, strip_uncertainty_markers,
@@ -35,6 +35,7 @@ def render_pdf_pages(pdf_path, dpi: int = 150):
         if total > limit:
             raise DocumentOversizedError(f"PDF has {total} pages; the limit is {limit}.")
         for number in range(total):
+            check_deadline()
             page = pdf.load_page(number)
             pix = None
             try:
@@ -49,10 +50,9 @@ def render_pdf_pages(pdf_path, dpi: int = 150):
 
 
 def store_page_image(document: Document, page_number: int, png_bytes: bytes) -> str:
-    """Persist a rendered page image to storage; return its url."""
+    """Persist a rendered page image; return the durable storage key."""
     name = f"{document.user_id}/pages/{document.id}/p{page_number}_{uuid.uuid4().hex[:8]}.png"
-    saved = default_storage.save(name, ContentFile(png_bytes))
-    return default_storage.url(saved)
+    return default_storage.save(name, ContentFile(png_bytes))
 
 
 def build_document_pages(document: Document, *, version=None, check_lease=lambda: None) -> int:
@@ -63,13 +63,16 @@ def build_document_pages(document: Document, *, version=None, check_lease=lambda
     with tempfile.TemporaryDirectory(prefix="studywise-pdf-") as directory:
         pdf_path = Path(directory) / "document.pdf"
         with default_storage.open(document.file.name, "rb") as source, pdf_path.open("wb") as target:
-            shutil.copyfileobj(source, target, length=64 * 1024)
+            for chunk in iter(lambda: source.read(64 * 1024), b""):
+                check_deadline()
+                target.write(chunk)
         with closing(render_pdf_pages(pdf_path)) as pages:
             for page_number, total, layer, png in pages:
+                check_deadline()
                 check_lease()
                 use_vision = (VISION_ENABLED and page_number <= VISION_MAX_PAGES
                               and page_needs_vision(layer))
-                image_url = store_page_image(document, page_number, png)
+                object_key = store_page_image(document, page_number, png)
                 if use_vision:
                     try:
                         md = reconstruct_page_markdown(png, page_number=page_number)
@@ -82,7 +85,8 @@ def build_document_pages(document: Document, *, version=None, check_lease=lambda
                     text_source = DocumentPage.SOURCE_LAYER
                 DocumentPage.objects.update_or_create(
                     document=document, version=version, page_number=page_number,
-                    defaults={"image_url": image_url, "reconstructed_md": md, "text_source": text_source},
+                    defaults={"s3_object_key": object_key, "image_url": "",
+                              "reconstructed_md": md, "text_source": text_source},
                 )
                 del png
                 push_ingestion_status(document.user_id, document.id, PHASE_PAGE,

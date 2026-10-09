@@ -3,7 +3,7 @@ import logging
 import tiktoken
 import io
 from celery import shared_task
-from celery.exceptions import Retry
+from celery.exceptions import Retry, SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.files.storage import default_storage
 
@@ -46,6 +46,7 @@ import uuid
 
 from utils.embedding import EmbeddingClient
 from utils.token_budget import split_for_embedding
+from utils.deadline import DeadlineExceeded, check_deadline, ingestion_deadline, timeout_for
 
 # ---------------------------------------------
 
@@ -162,6 +163,8 @@ def _sparse_index_or_none(correlation_id=""):
         return None
     try:
         return get_pinecone_sparse_index()
+    except DeadlineExceeded:
+        raise
     except Exception as e:
         logger.warning(f"[{correlation_id}] sparse index unavailable: {e}")
         return None
@@ -279,6 +282,7 @@ def _version_chunks(doc, text, tokenizer, version):
         sources = [(0, text)]
     prepared = []
     for page_number, content in sources:
+        check_deadline()
         pieces = [piece for chunk in chunk_text_by_token(content, tokenizer)
                   if len(chunk.strip()) > 10
                   for piece in split_for_embedding(chunk.strip())]
@@ -312,7 +316,9 @@ def process_document_for_existing_chapter(document_id, chapter_id):
     process_document_ingestion.delay(str(document_id), chapter_id=str(chapter_id))
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60,
+             soft_time_limit=900, time_limit=930)
+@ingestion_deadline
 def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_id=None):
     close_old_connections()
     doc = revision = lease = None
@@ -332,6 +338,7 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
                 DocumentPage.objects.bulk_create([
                     DocumentPage(document=doc, version=revision.version,
                                  page_number=p.page_number, image_url=p.image_url,
+                                 s3_object_key=p.s3_object_key,
                                  reconstructed_md=p.reconstructed_md, text_source=p.text_source)
                     for p in doc.pages.filter(version=doc.active_version)
                 ])
@@ -347,6 +354,7 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
                 else:
                     completion = llm.chat.completions.create(
                         model=LLM_MODEL, max_tokens=1000,
+                        timeout=timeout_for(45),
                         messages=[{"role": "user", "content":
                                    "Give this study material a short title (4-5 words), without quotes:\n" + text[:4000]}],
                     )
@@ -379,6 +387,7 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
             push_ingestion_status(doc.user_id, doc.id, PHASE_CHUNKING, total_batches=total_batches)
             probe_vector = None
             for offset in range(0, len(chunks), batch_size):
+                check_deadline()
                 lease.check()
                 batch = chunks[offset:offset + batch_size]
                 texts = [chunk for _, _, chunk in batch]
@@ -389,14 +398,15 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
                     embeddings = async_to_sync(embedding_client.embed_texts)(texts)
                     if len(embeddings) != len(batch):
                         raise ValueError("Embedding provider returned an incomplete batch")
+                    check_deadline()
                     lease.check()
                     points = [{"id": point_id, "values": vector,
                                "metadata": build_chunk_metadata(doc, chunk, page_number=page,
                                                                 version=revision.version)}
                               for (point_id, page, chunk), vector in zip(batch, embeddings)]
-                    vector_index.upsert(vectors=points)
+                    vector_index.upsert(vectors=points, timeout=timeout_for(10))
                     probe_vector = embeddings[0]
-                except LeaseLost:
+                except (DeadlineExceeded, LeaseLost, SoftTimeLimitExceeded):
                     raise
                 except Exception as exc:
                     raise RuntimeError(f"Embedding/index batch {batch_number} failed: {exc}") from exc
@@ -412,8 +422,8 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
                                   for (point_id, page, chunk), sparse in zip(batch, sparse_vectors)
                                   if sparse["indices"]]
                         if points:
-                            sparse_index.upsert(vectors=points)
-                    except LeaseLost:
+                            sparse_index.upsert(vectors=points, timeout=timeout_for(10))
+                    except (DeadlineExceeded, LeaseLost, SoftTimeLimitExceeded):
                         raise
                     except Exception:
                         logger.warning("Sparse batch unavailable; new version remains dense-capable", exc_info=True)
@@ -421,6 +431,7 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
             verify_vectors(vector_index, [key for key, _, _ in chunks], doc.id,
                            revision.version, lease, probe_vector=probe_vector)
             push_ingestion_status(doc.user_id, doc.id, PHASE_STORING)
+            check_deadline()
             activate_version(doc.id, revision, lease)
     except Document.DoesNotExist:
         logger.info("Document %s no longer exists; ingestion stopped", document_id)
@@ -437,7 +448,7 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
             # A failed rebuild does not turn the active document into a failed upload.
             if doc.status != Document.STATUS_COMPLETED and not doc.active_version:
                 push_ingestion_status(doc.user_id, doc.id, PHASE_FAILED, error=str(exc))
-        if isinstance(exc, (DocumentOversizedError, LeaseLost)):
+        if isinstance(exc, (DeadlineExceeded, SoftTimeLimitExceeded, DocumentOversizedError, LeaseLost)):
             raise
         raise self.retry(exc=exc)
 

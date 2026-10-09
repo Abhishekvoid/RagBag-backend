@@ -17,6 +17,7 @@ from utils.circuit_breaker import llm_circuit_breaker, tei_circuit_breaker
 from utils.metrics.latency import latency_tracker
 from utils.metrics.cost import cost_tracker
 from utils.metrics.retrieval import retrieval_evaluator
+from utils.metrics.hybrid import hybrid_stats
 import os
 
 
@@ -30,6 +31,7 @@ import json
 logger = logging.getLogger(__name__)
 
 from .rag_pipeline import RagPipeline, PipelineOutcome
+from utils.deadline import DeadlineExceeded, chat_deadline, check_deadline
 from .ai_clients import LLM_MODEL, llm_client
 from .ws_auth import WS_TICKET_TTL, issue_ticket
 
@@ -189,6 +191,11 @@ class MetricsView(APIView):
             "latency_ms_by_stage": latency_tracker.get_metrics(),
             "cost": cost_tracker.get_summary(),
             "retrieval": retrieval_evaluator.get_summary(),
+            # dense_only_rate is the one to watch: a sustained non-zero value
+            # means hybrid retrieval is silently not happening. Check
+            # sparse_empty (chapters need reindex_hybrid) against
+            # sparse_unavailable (Pinecone problem) to tell which.
+            "hybrid_retrieval": hybrid_stats.get_summary(),
             "circuit_breakers": breakers,
         })
 
@@ -515,6 +522,7 @@ class ChatSessionRetriveView(generics.RetrieveAPIView):
 class RAGChatMessageView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @chat_deadline
     def post(self, request, *args, **kwargs):
         serializer = RAGChatMessageSerializer(data=request.data)
         if not serializer.is_valid():
@@ -583,7 +591,7 @@ class RAGChatMessageView(APIView):
                 return Response(
                     {"error": result.error, "retryable": True}, status=failure_status,
                 )
-            if result.outcome not in (PipelineOutcome.SUCCESS, PipelineOutcome.INSUFFICIENT_EVIDENCE):
+            if result.outcome not in (PipelineOutcome.SUCCESS, PipelineOutcome.SUMMARY_GENERATED, PipelineOutcome.INSUFFICIENT_EVIDENCE):
                 raise ValueError("Unexpected pipeline outcome")
 
             ai_text = result.answer
@@ -604,6 +612,7 @@ class RAGChatMessageView(APIView):
 
             # Persist both sides together, only after a conversational result.
             with transaction.atomic():
+                check_deadline()
                 ChatMessage.objects.create(session=session, sender='user', text=user_query)
                 ai_message = ChatMessage.objects.create(
                     session=session,
@@ -613,6 +622,7 @@ class RAGChatMessageView(APIView):
                     suggestions=followups,
                     is_unanswered=is_unanswered,
                 )
+                check_deadline()
 
             response_data = {
                 "id": str(ai_message.id),
@@ -630,6 +640,8 @@ class RAGChatMessageView(APIView):
             return Response({"error": "Document not found for this chapter."}, status=status.HTTP_404_NOT_FOUND)
         
         
+        except DeadlineExceeded:
+            raise
         except Exception as e:
             logger.error(f"Error in RAG pipeline for user {user.id}, chapter {chapter_id}: {e}", exc_info=True)
             return Response({"error": "Failed to get AI response."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

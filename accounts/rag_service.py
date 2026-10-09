@@ -12,11 +12,13 @@ from .ai_clients import (
     SPARSE_INPUT_QUERY,
     SPARSE_MAX_TOKENS_PER_SEQUENCE,
     get_pinecone_index,
-    get_pinecone_sparse_index,
+    PINECONE_INDEX, PINECONE_SPARSE_INDEX,
+    query_index, async_pinecone_client,
     pinecone_client,
 )
 from utils.embedding import EmbeddingClient
 from utils.metrics.hybrid import hybrid_stats
+from utils.deadline import DeadlineExceeded, check_deadline, timeout_for, within_deadline
 
 embedding_client = EmbeddingClient()
 logger = logging.getLogger(__name__)
@@ -45,16 +47,17 @@ def _sparse_params(input_type: str) -> Dict[str, Any]:
     }
 
 
-def _embed_sparse_blocking(texts: Sequence[str], input_type: str) -> List[Dict[str, list]]:
-    """Blocking sparse embed. The Pinecone SDK is synchronous; callers thread it."""
+async def _embed_sparse(texts: Sequence[str], input_type: str) -> List[Dict[str, list]]:
+    """Native async inference can be cancelled at the request deadline."""
     if pinecone_client is None:
         raise SparseEmbeddingUnavailable("PINECONE_API_KEY is not set")
 
-    response = pinecone_client.inference.embed(
-        model=SPARSE_EMBED_MODEL,
-        inputs=list(texts),
-        parameters=_sparse_params(input_type),
-    )
+    async with async_pinecone_client() as client:
+        response = await client.inference.embed(
+            model=SPARSE_EMBED_MODEL,
+            inputs=list(texts),
+            parameters=_sparse_params(input_type),
+        )
 
     out = []
     for item in response.data:
@@ -79,6 +82,7 @@ def _embed_sparse_blocking(texts: Sequence[str], input_type: str) -> List[Dict[s
     return out
 
 
+@within_deadline
 async def embed_sparse(texts, *, input_type: str) -> List[Dict[str, list]]:
 
     if isinstance(texts, str):
@@ -92,8 +96,8 @@ async def embed_sparse(texts, *, input_type: str) -> List[Dict[str, list]]:
         )
 
     try:
-        return await asyncio.to_thread(_embed_sparse_blocking, texts, input_type)
-    except SparseEmbeddingUnavailable:
+        return await _embed_sparse(texts, input_type)
+    except (DeadlineExceeded, SparseEmbeddingUnavailable):
         raise
     except Exception as e:
         raise SparseEmbeddingUnavailable(f"sparse embedding failed: {e}") from e
@@ -133,24 +137,20 @@ def _matches(response) -> list:
 # --- index queries -----------------------------------------------------------
 
 
-def _query_dense_blocking(vector: List[float], filter: Optional[dict], top_k: int):
-    return get_pinecone_index().query(
-        vector=vector,
-        top_k=top_k,
-        include_metadata=True,
-        include_values=False,
-        filter=filter,
-    )
+async def _query_dense(vector, filter, top_k):
+    async with query_index(PINECONE_INDEX) as index:
+        return await index.query(
+            vector=vector, top_k=top_k, include_metadata=True,
+            include_values=False, filter=filter, timeout=timeout_for(10),
+        )
 
 
-def _query_sparse_blocking(sparse_vector: Dict[str, list], filter: Optional[dict], top_k: int):
-    return get_pinecone_sparse_index().query(
-        sparse_vector=sparse_vector,
-        top_k=top_k,
-        include_metadata=True,
-        include_values=False,
-        filter=filter,
-    )
+async def _query_sparse(sparse_vector, filter, top_k):
+    async with query_index(PINECONE_SPARSE_INDEX) as index:
+        return await index.query(
+            sparse_vector=sparse_vector, top_k=top_k, include_metadata=True,
+            include_values=False, filter=filter, timeout=timeout_for(10),
+        )
 
 
 async def search_dense_ranked(
@@ -163,7 +163,7 @@ async def search_dense_ranked(
         return []
 
     tasks = [
-        asyncio.to_thread(_query_dense_blocking, v, filter, limit_per_vector)
+        _query_dense(v, filter, limit_per_vector)
         for v in vectors
     ]
     responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -171,6 +171,8 @@ async def search_dense_ranked(
     lists = []
     for i, response in enumerate(responses):
         if isinstance(response, BaseException):
+            if isinstance(response, (DeadlineExceeded, asyncio.CancelledError)):
+                raise response
             # One variant failing is survivable — the others still retrieve, and
             # RRF over fewer lists is a weaker ranking rather than a broken one.
             logger.warning("dense query %d/%d failed: %s", i + 1, len(vectors), response)
@@ -188,9 +190,7 @@ async def search_sparse_ranked(
     limit: int = 15,
 ) -> List[Any]:
 
-    response = await asyncio.to_thread(
-        _query_sparse_blocking, sparse_vector, filter, limit
-    )
+    response = await _query_sparse(sparse_vector, filter, limit)
     return _matches(response)
 
 
@@ -265,6 +265,8 @@ async def hybrid_search(
     dense_error = None
     try:
         dense_lists = await search_dense_ranked(dense_vectors, filter, limit_per_vector)
+    except DeadlineExceeded:
+        raise
     except Exception as exc:
         dense_error = exc
         dense_lists = []
@@ -289,10 +291,13 @@ async def hybrid_search(
                     "sparse index returned no matches; answering dense-only "
                     "(chapter likely not backfilled — run reindex_hybrid)"
                 )
+        except DeadlineExceeded:
+            raise
         except Exception as e:
             outcome = "sparse_unavailable"
             logger.warning("sparse retrieval unavailable, falling back to dense: %s", e)
 
+    check_deadline()
     hybrid_stats.record(outcome=outcome)
 
     if dense_error is not None and not sparse_lists:

@@ -328,7 +328,7 @@ class HybridSearchDegradationTests(TestCase):
         from asgiref.sync import async_to_sync
         from accounts.rag_service import search_dense_ranked
 
-        with mock.patch("accounts.rag_service._query_dense_blocking",
+        with mock.patch("accounts.rag_service._query_dense",
                         side_effect=TimeoutError("dense down")):
             with self.assertRaises(TimeoutError):
                 async_to_sync(search_dense_ranked)([[0.1], [0.2]], filter=None)
@@ -337,7 +337,7 @@ class HybridSearchDegradationTests(TestCase):
         from asgiref.sync import async_to_sync
         from accounts.rag_service import search_dense_ranked
 
-        with mock.patch("accounts.rag_service._query_dense_blocking",
+        with mock.patch("accounts.rag_service._query_dense",
                         side_effect=[TimeoutError("one query down"), {"matches": []}]):
             self.assertEqual(
                 async_to_sync(search_dense_ranked)([[0.1], [0.2]], filter=None), [[]]

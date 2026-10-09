@@ -27,8 +27,8 @@ class VersionedIngestionTests(TestCase):
             yield self.lease
         self.records = {}
         self.index = mock.Mock()
-        self.index.upsert.side_effect = lambda *, vectors: self.records.update({p["id"]: p for p in vectors})
-        self.index.fetch.side_effect = lambda *, ids: {"vectors": {i: self.records[i] for i in ids if i in self.records}}
+        self.index.upsert.side_effect = lambda *, vectors, timeout: self.records.update({p["id"]: p for p in vectors})
+        self.index.fetch.side_effect = lambda *, ids, timeout: {"vectors": {i: self.records[i] for i in ids if i in self.records}}
         self.index.query.side_effect = lambda **kw: {"matches": [{"id": i} for i in self.records]}
         self.index.list.side_effect = lambda *, prefix: [[i for i in self.records if i.startswith(prefix)]]
         tokenizer = SimpleNamespace(encode=list, decode="".join)
@@ -51,6 +51,31 @@ class VersionedIngestionTests(TestCase):
 
     def ingest(self, **kwargs):
         return tasks.process_document_ingestion.run(str(self.doc.id), **kwargs)
+
+    def test_reindex_copies_durable_page_key(self):
+        key = f"{self.user.id}/pages/{self.doc.id}/p1_original.png"
+        DocumentPage.objects.create(document=self.doc, version=0, page_number=1,
+                                    reconstructed_md="Original page " * 25, s3_object_key=key)
+        self.ingest()
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.pages.get(version=self.doc.active_version).s3_object_key, key)
+
+    def test_ingestion_has_its_own_budget_and_does_not_publish_after_expiry(self):
+        from utils.deadline import RequestDeadline, DeadlineExceeded, current_deadline, deadline_scope
+        def expire(batch):
+            self.assertGreater(current_deadline().remaining, 890)
+            current_deadline().expires_at -= 901
+            return [[0.1] * 384 for _ in batch]
+        self.embed.side_effect = expire
+        with deadline_scope(RequestDeadline(0)):
+            with self.assertRaises(DeadlineExceeded):
+                self.ingest()
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.active_version, 0)
+        self.assertIsNone(self.doc.pending_version)
+        self.assertEqual(self.doc.status, Document.STATUS_COMPLETED)
+        self.assertIn("deadline", self.doc.error_message.lower())
+        self.index.upsert.assert_not_called()
 
     def test_live_version_is_untouched_until_all_records_are_searchable(self):
         def query(**kwargs):

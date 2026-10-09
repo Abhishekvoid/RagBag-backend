@@ -231,17 +231,29 @@ SITE_ID = 1
 # FileField on Document, with no direct boto3 client anywhere in the app — so
 # changing provider is a settings change and nothing else.
 #
-# This previously pointed at Supabase Storage, which is S3-compatible but is not
-# S3, and the difference was three settings:
+# The provider is chosen by ONE variable: AWS_S3_ENDPOINT_URL.
 #
-#   AWS_S3_ENDPOINT_URL       Supabase needs an explicit host. AWS does not:
-#                             boto3 derives the endpoint from bucket + region.
-#                             The variable is gone rather than blanked, because
-#                             a stale endpoint pointing at an abandoned domain
-#                             is a worse failure than a missing one.
-#   AWS_S3_ADDRESSING_STYLE   Supabase requires the legacy path style. AWS wants
-#                             virtual-hosted, and requires it for buckets made
-#                             after September 2020.
+#   unset  -> native AWS S3. boto3 derives the endpoint from bucket + region,
+#             and addressing is virtual-hosted, which AWS requires for buckets
+#             created after September 2020.
+#   set    -> an S3-COMPATIBLE provider (Supabase Storage, MinIO, R2, Wasabi).
+#             These need an explicit host, and they serve buckets under the
+#             legacy path style rather than as a subdomain.
+#
+# This setting was previously DELETED from the file when storage moved to native
+# AWS, on the reasoning that a stale endpoint is worse than a missing one. That
+# reasoning was sound but the execution was not: deleting the read left the
+# variable still present in .env, still exported into the process, and silently
+# IGNORED. The result was the worst of both worlds — boto3 signed Supabase
+# credentials against `<bucket>.s3.<region>.amazonaws.com`, a bucket in a
+# different AWS account entirely, and every upload died on
+# `HeadObject -> 403 Forbidden` from inside django-storages' existence check.
+#
+# So the variable is read again, and the two settings that must move WITH it
+# (addressing style, and the boot guard below) are derived from it rather than
+# hardcoded. A provider switch is now one line of .env, which is what the
+# paragraph above always claimed it was.
+#
 #   MEDIA_URL                 was a hand-built Supabase public-object template.
 #                             See below — it was never actually used.
 
@@ -257,8 +269,33 @@ AWS_STORAGE_BUCKET_NAME = _require(
 # successfully against the wrong bucket namespace instead of failing outright.
 AWS_S3_REGION_NAME = _require(os.getenv("AWS_S3_REGION_NAME"), "AWS_S3_REGION_NAME")
 
-AWS_S3_ADDRESSING_STYLE = "virtual"
+# Empty string is normalised to None so that `AWS_S3_ENDPOINT_URL=` in a .env
+# means "native AWS" rather than "endpoint at the empty host", which boto3
+# rejects with an error that names neither the setting nor the file.
+AWS_S3_ENDPOINT_URL = (os.getenv("AWS_S3_ENDPOINT_URL") or "").strip() or None
+
+# Path style for S3-compatible hosts, virtual-hosted for AWS. Getting this wrong
+# is not a hard error — it is a 403 or a NoSuchBucket from a URL that looks
+# plausible — so it is derived, never configured independently.
+AWS_S3_ADDRESSING_STYLE = "path" if AWS_S3_ENDPOINT_URL else "virtual"
 AWS_S3_SIGNATURE_VERSION = "s3v4"
+
+# Guard the specific mistake that produced the 403 above: credentials belonging
+# to an S3-compatible provider, pointed at real AWS because the endpoint was
+# missing. Every AWS key id is 20 characters and begins AKIA (long-lived IAM),
+# ASIA (STS), or the account-scoped A*IA forms; Supabase, MinIO and R2 all issue
+# 32-character hex keys. Sending one of those to AWS cannot ever succeed, so
+# saying so at boot beats discovering it in a traceback under `serializer.save()`.
+if AWS_STORAGE_BUCKET_NAME and not AWS_S3_ENDPOINT_URL and AWS_ACCESS_KEY_ID:
+    if not AWS_ACCESS_KEY_ID.startswith(("AKIA", "ASIA")):
+        raise ImproperlyConfigured(
+            "AWS_ACCESS_KEY_ID does not look like an AWS key (expected a "
+            "20-character id starting AKIA/ASIA) and AWS_S3_ENDPOINT_URL is not "
+            "set, so storage would sign these credentials against native AWS S3 "
+            "and fail with 403 on every upload. Either set AWS_S3_ENDPOINT_URL "
+            "to your S3-compatible provider's endpoint, or replace the "
+            "credentials with real AWS IAM keys."
+        )
 
 AWS_S3_FILE_OVERWRITE = False
 
@@ -304,9 +341,18 @@ MEDIA_ROOT = BASE_DIR / "media"
 # in DEBUG or under the test runner — fall back to the local filesystem, so that
 # `manage.py check`, `manage.py test` and ordinary local development need no AWS
 # account and no credentials at all.
+from botocore.config import Config as S3ClientConfig
+
 STORAGES = {
     "default": (
-        {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"}
+        {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage", "OPTIONS": {
+            "client_config": S3ClientConfig(
+                signature_version=AWS_S3_SIGNATURE_VERSION,
+                s3={"addressing_style": AWS_S3_ADDRESSING_STYLE},
+                connect_timeout=5, read_timeout=30,
+                retries={"total_max_attempts": 2},
+            ),
+        }}
         if AWS_STORAGE_BUCKET_NAME
         else {"BACKEND": "django.core.files.storage.FileSystemStorage"}
     ),
@@ -370,7 +416,8 @@ DATABASES = {
         'USER': os.getenv('SUPABASE_DB_USER'),
         'PORT': os.getenv('SUPABASE_DB_PORT', '5432'),
         'PASSWORD': os.getenv('SUPABASE_DB_PASSWORD'),
-        'OPTIONS': { 'sslmode': 'require' },
+        'OPTIONS': {'sslmode': 'require', 'connect_timeout': 5,
+                    'options': '-c statement_timeout=5000'},
     }
 }
 # DATABASES = {

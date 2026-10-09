@@ -135,8 +135,8 @@ class DocumentPage(models.Model):
     """One page of a document's canonical, reader-facing text.
 
     ``reconstructed_md`` is the clean markdown shown in the reader and used for
-    RAG/flashcards/questions. ``image_url`` is the rendered original page, kept
-    as a verification layer for the AI's ``[?word]`` uncertainty markers.
+    RAG/flashcards/questions. ``s3_object_key`` locates the rendered original
+    page; the serializer signs its URL when serving the verification layer.
     """
 
     SOURCE_LAYER = 'layer'       # born-digital: used the PDF's own text layer
@@ -152,7 +152,8 @@ class DocumentPage(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='pages')
     page_number = models.PositiveIntegerField()          # 1-indexed
     version = models.PositiveIntegerField(default=0)
-    image_url = models.TextField(blank=True)             # S3 url of the rendered original page
+    image_url = models.TextField(blank=True)             # Legacy URL; retained for migration recovery
+    s3_object_key = models.CharField(max_length=512, blank=True)
     reconstructed_md = models.TextField(blank=True)
     text_source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_LAYER)
     created_at = models.DateTimeField(auto_now_add=True)

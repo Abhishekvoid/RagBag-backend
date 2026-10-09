@@ -11,6 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from utils.circuit_breaker import redis_client
+from utils.deadline import check_deadline, timeout_for
 from .models import Document, DocumentIndexVersion
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class IngestionLease:
         self.lost = threading.Event()
 
     def check(self):
+        check_deadline()
         if self.lost.is_set() or redis_client.get(self.key) != self.token:
             raise LeaseLost("Document ingestion lease was lost")
 
@@ -159,7 +161,7 @@ def verify_vectors(index, ids, document_id, version, lease, *, probe_vector=None
             batch = [key for key in ids[start:start + 100] if key in remaining]
             if not batch:
                 continue
-            response = index.fetch(ids=batch)
+            response = index.fetch(ids=batch, timeout=timeout_for(10))
             vectors = response.get("vectors", {}) if isinstance(response, dict) else response.vectors
             for key, vector in vectors.items():
                 metadata = vector.get("metadata", {}) if isinstance(vector, dict) else vector.metadata
@@ -172,14 +174,15 @@ def verify_vectors(index, ids, document_id, version, lease, *, probe_vector=None
                                    filter={"$and": [
                                        {"document_id": {"$eq": str(document_id)}},
                                        {"version": {"$eq": version}},
-                                   ]}, include_metadata=False, include_values=False)
+                                   ]}, include_metadata=False, include_values=False,
+                                   timeout=timeout_for(10))
             matches = response.get("matches", []) if isinstance(response, dict) else response.matches
             visible = {m.get("id") if isinstance(m, dict) else m.id for m in matches}
             if set(ids).issubset(visible):
                 return
         if time.monotonic() >= deadline:
             raise TimeoutError("Index verification timed out; the complete version is not searchable")
-        time.sleep(1)
+        time.sleep(timeout_for(1))
 
 
 def version_prefix(document_id, version):

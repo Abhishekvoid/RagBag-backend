@@ -30,6 +30,10 @@ import uuid
 from asgiref.sync import sync_to_async
 
 from utils.llm_gateway import ask_llm, LLMUnavailable
+from utils.deadline import (
+    CHAT_BUDGET, DeadlineExceeded, RequestDeadline, check_deadline,
+    current_deadline, deadline_scope, within_deadline,
+)
 from .rag_service import (
     embed_texts,
     hybrid_search,
@@ -77,12 +81,6 @@ def build_answer_messages(context: str, query: str) -> list:
         {"role": "user", "content": user_content},
     ]
 
-
-# How much chapter text a summary may consume. ANSWER_MODEL has a very large
-# context window, so this is a cost and latency bound rather than a technical
-# one — and when it binds, the user is told, because a summary that silently
-# covers only the first third of a chapter is worse than no summary.
-SUMMARY_CHAR_BUDGET = 60_000
 
 # The retrieval funnel, named rather than inlined so the shape is readable in
 # one place: fuse everything, hand a shortlist to the cross-encoder, keep the
@@ -203,6 +201,7 @@ def build_sources(final_results) -> list:
 
 class PipelineOutcome(str, Enum):
     SUCCESS = "success"
+    SUMMARY_GENERATED = "summary_generated"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
     DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
     DEADLINE_EXCEEDED = "deadline_exceeded"
@@ -296,6 +295,14 @@ class RagPipeline:
         return any(re.search(rf"\b{greet}\b", query) for greet in greetings)
         
     async def run(self, user_query, chat_history, chapter_id, user_id) -> PipelineResult:
+        with deadline_scope(current_deadline() or RequestDeadline(CHAT_BUDGET)):
+            try:
+                return await self._run(user_query, chat_history, chapter_id, user_id)
+            except DeadlineExceeded as exc:
+                return _failure(exc)
+
+    @within_deadline
+    async def _run(self, user_query, chat_history, chapter_id, user_id) -> PipelineResult:
         # step 1: contextualization
 
         request_id = str(uuid.uuid4())
@@ -343,6 +350,9 @@ class RagPipeline:
             
             status = result.outcome.value
             return result
+        except asyncio.CancelledError:
+            status = PipelineOutcome.DEADLINE_EXCEEDED.value
+            raise
         except Exception as e:
             status = "failed"
 
@@ -356,7 +366,9 @@ class RagPipeline:
                 }
             )
 
-            raise
+            result = _failure(e)
+            status = result.outcome.value
+            return result
 
         finally:
             total_latency_ms = (time.monotonic() - start_time) * 1000
@@ -416,6 +428,8 @@ class RagPipeline:
                     completion.choices[0].message.content, query
                 )
                 status = "success"
+            except DeadlineExceeded:
+                raise
             except LLMUnavailable:
                 logger.info("contextualize_and_route skipped — LLM unavailable")
                 status = "degraded"
@@ -475,6 +489,8 @@ class RagPipeline:
                 timeout=30.0,
             )
             return parse_followups(resp.choices[0].message.content)
+        except DeadlineExceeded:
+            raise
         except Exception as e:
             logger.warning(f"Follow-up generation failed: {e}")
             return []
@@ -486,77 +502,87 @@ class RagPipeline:
         )
 
     async def handle_summary(self, chapter_id, user_id):
-        """Summarise a chapter from its stored txt deliberately not via retrieval."""
+        """Map active canonical pages, then hierarchically reduce every batch."""
+        from .summary import (
+            MAP_PROMPT, REDUCE_PROMPT, MAX_BATCH_CHARS, MAX_SUMMARY_CHARS,
+            PAGES_PER_BATCH, SUMMARY_CONCURRENCY, summary_batches,
+        )
 
-        text = await self._chapter_text(chapter_id, user_id)
-
-        if not text:
-            return _result(
-                "I couldn't find any readable text in this chapter yet. "
-                "If you just uploaded it, give it a moment to finish processing.",
-                outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE,
+        async def summarize(material, prompt):
+            check_deadline()
+            completion = await ask_llm(
+                self.llm_client, model=ANSWER_MODEL,
+                messages=[{"role": "system", "content": prompt},
+                          {"role": "user", "content": material}],
+                temperature=0.2, max_tokens=1200, timeout=45.0,
             )
+            content = (completion.choices[0].message.content or "").strip()
+            if not content or len(content) > MAX_SUMMARY_CHARS:
+                raise ValueError("Summary response is empty or exceeds its output limit")
+            return content
 
-        if len(text) > SUMMARY_CHAR_BUDGET:
-            # Say so rather than quietly summarising the first N characters and
-            # calling it a summary of the chapter.
-            logger.warning(
-                "summary input truncated: %d -> %d chars (chapter %s)",
-                len(text), SUMMARY_CHAR_BUDGET, chapter_id,
-            )
-            text = text[:SUMMARY_CHAR_BUDGET]
-            truncated = True
-        else:
-            truncated = False
-
-        messages = [
-            {"role": "system", "content": TUTOR_SYSTEM_PROMPT},
-            {"role": "user", "content": (
-                "Summarise the student's material below so they can see the shape "
-                "of the whole chapter: what it covers, the main ideas in order, and "
-                "how they connect. Lead with one sentence on what the chapter is "
-                "about, then the key points. Keep it tight.\n\n"
-                f"STUDENT'S MATERIAL:\n{text}"
-            )},
-        ]
+        async def summarize_batches(batches, prompt):
+            # At most three tasks exist at once. A failed or cancelled batch
+            # cancels its siblings; no map calls survive the request.
+            results = []
+            for start in range(0, len(batches), SUMMARY_CONCURRENCY):
+                tasks = [asyncio.create_task(summarize(batch, prompt))
+                         for batch in batches[start:start + SUMMARY_CONCURRENCY]]
+                try:
+                    results.extend(await asyncio.gather(*tasks))
+                finally:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+            return results
 
         try:
-            async with latency_tracker.track_async("summary_generation"):
-                completion = await ask_llm(
-                    self.llm_client,
-                    messages=messages,
-                    model=ANSWER_MODEL,
-                    temperature=0.4,
-                    max_tokens=4000,
-                    timeout=45.0,
+            pages = await self._chapter_pages(chapter_id, user_id)
+            if not pages:
+                return _result(
+                    "I couldn't find any readable text in this chapter yet. "
+                    "If you just uploaded it, give it a moment to finish processing.",
+                    outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE,
                 )
-            summary = enforce_markdown_spacing(completion.choices[0].message.content or "")
-        except Exception as e:
-            logger.error(f"Summary generation failed: {e}", exc_info=True)
-            return _failure(e)
-
-        if truncated:
-            summary += (
-                "\n\n*(This chapter is long — the summary above covers the earlier "
-                "sections. Ask about a specific topic for the rest.)*"
-            )
-        return _result(summary)
+            async with latency_tracker.track_async("summary_generation"):
+                summaries = await summarize_batches(list(summary_batches(pages)), MAP_PROMPT)
+                while len(summaries) > PAGES_PER_BATCH or len("\n\n".join(summaries)) > MAX_BATCH_CHARS:
+                    summaries = await summarize_batches(list(summary_batches(summaries)), REDUCE_PROMPT)
+                guide = await summarize("\n\n".join(summaries), REDUCE_PROMPT)
+            return _result(enforce_markdown_spacing(guide), outcome=PipelineOutcome.SUMMARY_GENERATED)
+        except Exception as exc:
+            logger.exception("Chapter summary failed")
+            return _failure(exc)
 
     @staticmethod
     @sync_to_async
-    def _chapter_text(chapter_id, user_id) -> str:
-     
-        from .models import Document as _Document
+    def _chapter_pages(chapter_id, user_id):
+        from django.db.models import F, Prefetch, Q
+        from .models import DocumentPage
+        from .vision_ocr import strip_uncertainty_markers
 
-        texts = (
-            _Document.objects
-            .filter(chapter_id=chapter_id, user_id=user_id)
-            .exclude(extracted_text="")
-            .exclude(extracted_text__isnull=True)
-            .order_by("created_at")
-            .values_list("extracted_text", flat=True)
-        )
-        return "\n\n---\n\n".join(t for t in texts if t and t.strip())
+        documents = (Document.objects.filter(chapter_id=chapter_id, user_id=user_id)
+                     .filter(Q(active_version__gt=0) | Q(status=Document.STATUS_COMPLETED))
+                     .order_by("created_at", "id")
+                     .prefetch_related(Prefetch(
+                         "pages", to_attr="summary_pages",
+                         queryset=DocumentPage.objects.filter(version=F("document__active_version"))
+                         .order_by("page_number"),
+                     )))
+        pages = []
+        for document in documents:
+            check_deadline()
+            if document.summary_pages:
+                for page in document.summary_pages:
+                    content = strip_uncertainty_markers(page.reconstructed_md).strip()
+                    if content:
+                        pages.append(f"{document.title}, page {page.page_number}:\n{content}")
+            elif document.extracted_text and document.extracted_text.strip():
+                # Legacy/non-PDF documents have no page records. Do not replace
+                # existing (even blank) canonical pages with stale extracted text.
+                pages.append(f"{document.title} (unpaginated):\n{document.extracted_text}")
+        return pages
 
     async def _expand_queries(self, query: str, num: int = 4) -> list[str]:
        
@@ -603,11 +629,14 @@ class RagPipeline:
                     json_mode = True,
                     temperature=0.2,
                     max_tokens=800,
+                    timeout=10.0,
                 )
                 all_queries = validated_search_queries(
                     expansion_response.choices[0].message.content, original_query, query,
                 )
 
+        except DeadlineExceeded:
+            raise
         except LLMUnavailable:
             logger.info(f"Query Expansion failed -> llm unavialable")
             all_queries = [original_query]

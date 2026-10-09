@@ -26,7 +26,7 @@ class BuildPagesTest(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    @mock.patch.object(page_pipeline, "store_page_image", return_value="https://s3/p.png")
+    @mock.patch.object(page_pipeline, "store_page_image", return_value="1/pages/doc/p1_saved.png")
     @mock.patch.object(page_pipeline, "reconstruct_page_markdown", return_value="## Vision page")
     def test_mixed_layer_and_vision(self, *_):
         with mock.patch.object(page_pipeline, "VISION_ENABLED", True):
@@ -35,10 +35,12 @@ class BuildPagesTest(TestCase):
         p1, p2 = list(self.doc.pages.all())
         self.assertEqual(p1.text_source, DocumentPage.SOURCE_VISION)   # empty layer -> vision
         self.assertEqual(p1.reconstructed_md, "## Vision page")
+        self.assertEqual(p1.s3_object_key, "1/pages/doc/p1_saved.png")
+        self.assertEqual(p1.image_url, "")
         self.assertEqual(p2.text_source, DocumentPage.SOURCE_LAYER)    # good layer -> skip vision
         self.assertIn("Good clean layer text", p2.reconstructed_md)
 
-    @mock.patch.object(page_pipeline, "store_page_image", return_value="https://s3/p.png")
+    @mock.patch.object(page_pipeline, "store_page_image", return_value="1/pages/doc/p1_saved.png")
     @mock.patch.object(page_pipeline, "reconstruct_page_markdown",
                        side_effect=vision_ocr.VisionUnavailable("ollama down"))
     def test_vision_failure_falls_back(self, *_):
@@ -64,7 +66,7 @@ class BuildPagesTest(TestCase):
         store.assert_not_called()
         self.assertFalse(self.doc.pages.exists())
 
-    @mock.patch.object(page_pipeline, "store_page_image", return_value="https://s3/page.png")
+    @mock.patch.object(page_pipeline, "store_page_image", return_value="1/pages/doc/p1_saved.png")
     def test_previous_page_is_persisted_before_next_page_renders(self, _):
         def pages(path):
             yield 1, 2, "First page", b"one"

@@ -8,6 +8,7 @@ from tenacity import (
 )
 import logging
 import openai
+from .deadline import stop_at_deadline, timeout_for, within_deadline
 
 
 logger = logging.getLogger(__name__)
@@ -45,10 +46,11 @@ def _content_or_raise(response):
     return response
 
 
+@within_deadline
 @retry(
         retry=retry_if_exception_type(RETRYABLE_ERRORS + (EmptyCompletion,)),
         wait=wait_exponential_jitter(initial=1, max=10), # Wait 1s, 2s, 4s... + jitter
-        stop=stop_after_attempt(3), # Give up after 3 tries
+        stop=stop_after_attempt(3) | stop_at_deadline,
         before_sleep=before_sleep_log(logger, logging.WARNING), # Log warnings on retry
         reraise=True # If it fails 3 times, raise so the caller/breaker sees it
     )
@@ -64,6 +66,7 @@ async def _call_llm_with_retry(client, messages, json_mode=False, **kwargs):
         **kwargs
 
     }
+    params["timeout"] = timeout_for(params.get("timeout") or 45.0)
 
     if json_mode:
         params["response_format"] = {"type": "json_object"}

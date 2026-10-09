@@ -13,6 +13,7 @@ would burn three retries and a timeout on every single query.
 import os
 import logging
 import httpx
+from .deadline import DeadlineExceeded, stop_at_deadline, timeout_for, within_deadline
 from tenacity import (
     retry,
     wait_exponential_jitter,
@@ -38,17 +39,19 @@ class TEIRerankClient:
     @retry(
         retry=retry_if_exception_type(RERANK_ERRORS),
         wait=wait_exponential_jitter(initial=1, max=5),
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(3) | stop_at_deadline,
         reraise=True,
     )
     async def _post(self, query: str, texts: list) -> list:
         response = await self.client.post(
             RERANK_URL,
             json={"query": query, "texts": texts},
+            timeout=timeout_for(RERANK_TIMEOUT),
         )
         response.raise_for_status()
         return response.json()
 
+    @within_deadline
     async def rerank(self, query: str, texts: list):
         """Return relevance scores aligned to `texts` order, or None on failure.
 
@@ -69,6 +72,8 @@ class TEIRerankClient:
                 if isinstance(idx, int) and 0 <= idx < len(scores):
                     scores[idx] = float(item.get("score", 0.0))
             return scores
+        except DeadlineExceeded:
+            raise
         except Exception as e:
             logger.warning(f"Rerank service unavailable, falling back: {e}")
             return None

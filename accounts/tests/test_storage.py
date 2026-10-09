@@ -38,6 +38,11 @@ PROD_STORAGE = {
     "AWS_SECRET_ACCESS_KEY": "test-secret-access-key",
     "AWS_STORAGE_BUCKET_NAME": "ragbag-media-test",
     "AWS_S3_REGION_NAME": "ap-south-1",
+    # Pinned, not inherited. These tests assert the NATIVE AWS contract, and
+    # AWS_S3_ENDPOINT_URL is the switch that turns it off. Leaving it to be
+    # picked up from the ambient .env made the whole class pass or fail on
+    # which provider the developer happened to have configured locally.
+    "AWS_S3_ENDPOINT_URL": None,
     "AWS_S3_ADDRESSING_STYLE": "virtual",
     "AWS_S3_SIGNATURE_VERSION": "s3v4",
     "AWS_QUERYSTRING_AUTH": True,
@@ -104,15 +109,44 @@ class ProductionStorageConfigurationTests(TestCase):
 class NoSupabaseAssumptionsRemainTests(TestCase):
     """The three settings that made this Supabase-specific."""
 
-    def test_no_endpoint_url_setting_exists(self):
+    def test_unset_endpoint_means_native_aws(self):
         """AWS derives the endpoint from bucket + region; Supabase could not.
 
-        Absent rather than blank, so a stale host cannot be reintroduced by
-        setting an env var that nothing reads.
+        The setting used to be ABSENT from settings.py so that "a stale host
+        cannot be reintroduced by an env var nothing reads". That backfired: the
+        env var stayed in .env, kept being exported, and was silently ignored —
+        so Supabase credentials got signed against native AWS and every upload
+        died on `HeadObject -> 403`. Ignoring configuration is not the same as
+        not having it.
+
+        So the setting exists and is READ, and the invariant under test is the
+        one that always mattered: with no endpoint configured, the backend must
+        talk to real AWS and nothing else.
         """
         from django.conf import settings
 
-        self.assertFalse(hasattr(settings, "AWS_S3_ENDPOINT_URL"))
+        with override_settings(**PROD_STORAGE):
+            self.assertIsNone(settings.AWS_S3_ENDPOINT_URL)
+            self.assertIsNone(s3_storage().endpoint_url)
+
+    def test_endpoint_url_selects_the_compatible_provider_path(self):
+        """The other half of the switch: a custom endpoint must also flip
+        addressing to path style, because S3-compatible hosts do not serve
+        buckets as subdomains. Deriving the two together is what stops them
+        drifting apart."""
+        from django.conf import settings
+
+        with override_settings(
+            **{**PROD_STORAGE,
+               "AWS_S3_ENDPOINT_URL": "https://example.storage.test/storage/v1/s3",
+               "AWS_S3_ADDRESSING_STYLE": "path"}
+        ):
+            storage = s3_storage()
+            self.assertEqual(
+                storage.endpoint_url, "https://example.storage.test/storage/v1/s3"
+            )
+            self.assertEqual(storage.addressing_style, "path")
+            self.assertIn("example.storage.test", storage.url("a/b.png"))
 
     @override_settings(**PROD_STORAGE)
     def test_backend_uses_no_custom_endpoint(self):
@@ -312,8 +346,8 @@ class StorageCallSitesGoThroughTheAbstractionTests(TestCase):
             url = page_pipeline.store_page_image(document, 1, b"\x89PNG")
 
         storage.save.assert_called_once()
-        storage.url.assert_called_once_with("7/pages/doc-1/p1_abcd1234.png")
-        self.assertIn("amazonaws.com", url)
+        storage.url.assert_not_called()
+        self.assertEqual(url, "7/pages/doc-1/p1_abcd1234.png")
 
     def test_document_cleanup_deletes_through_default_storage(self):
         from accounts import tasks

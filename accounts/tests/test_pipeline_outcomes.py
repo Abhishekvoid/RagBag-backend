@@ -85,6 +85,17 @@ class ChatPipelineOutcomeTests(APITestCase):
         self.assertEqual(ChatMessage.objects.count(), 2)
         self.assertFalse(ChatMessage.objects.get(sender="ai").is_unanswered)
 
+    def test_total_deadline_returns_retryable_504_without_saving_messages(self):
+        import asyncio
+        async def blocked(*args, **kwargs):
+            await asyncio.sleep(30)
+        self.dependencies["embed_texts"].side_effect = blocked
+        with mock.patch("utils.deadline.CHAT_BUDGET", .03):
+            response = self.post_chat()
+        self.assertEqual(response.status_code, 504)
+        self.assertTrue(response.data["retryable"])
+        self.assertFalse(ChatMessage.objects.exists())
+
     def test_no_evidence_is_saved_as_unanswered(self):
         self.dependencies["hybrid_search"].return_value = []
         response = self.post_chat()
@@ -101,24 +112,24 @@ class ChatPipelineOutcomeTests(APITestCase):
     def test_summary_timeout_does_not_persist(self):
         self.dependencies["contextualize_and_route"].return_value = ("Summarize", "summary")
         self.dependencies["ask_llm"].side_effect = TimeoutError("timeout")
-        with mock.patch("accounts.rag_pipeline.RagPipeline._chapter_text",
-                        new=mock.AsyncMock(return_value="Chapter text")):
+        with mock.patch("accounts.rag_pipeline.RagPipeline._chapter_pages",
+                        new=mock.AsyncMock(return_value=["Chapter text"])):
             response = self.post_chat()
         self.assertEqual(response.status_code, 504)
         self.assertFalse(ChatMessage.objects.exists())
 
     def test_empty_summary_is_unanswered(self):
         self.dependencies["contextualize_and_route"].return_value = ("Summarize", "summary")
-        with mock.patch("accounts.rag_pipeline.RagPipeline._chapter_text",
-                        new=mock.AsyncMock(return_value="")):
+        with mock.patch("accounts.rag_pipeline.RagPipeline._chapter_pages",
+                        new=mock.AsyncMock(return_value=[])):
             response = self.post_chat()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(ChatMessage.objects.get(sender="ai").is_unanswered)
 
     def test_summary_success_is_persisted(self):
         self.dependencies["contextualize_and_route"].return_value = ("Summarize", "summary")
-        with mock.patch("accounts.rag_pipeline.RagPipeline._chapter_text",
-                        new=mock.AsyncMock(return_value="Chapter text")):
+        with mock.patch("accounts.rag_pipeline.RagPipeline._chapter_pages",
+                        new=mock.AsyncMock(return_value=["Chapter text"])):
             response = self.post_chat()
         self.assertEqual(response.status_code, 201)
         self.assertEqual(ChatMessage.objects.get(sender="ai").text, "An answer")

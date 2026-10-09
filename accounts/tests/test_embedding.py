@@ -586,3 +586,65 @@ class ChunkTokenBudgetTests(TestCase):
             params["chunk_size"].default,
             "overlap >= chunk_size would loop forever and never advance",
         )
+
+
+class PerLoopConnectionPoolTests(TestCase):
+    """Regression guard for the bug that silently broke ingestion.
+
+    `async_to_sync` opens a NEW event loop for every call and closes it on
+    return, and ingestion calls it once per embedding batch. The httpx client
+    used to be built once in __init__, so its connection pool belonged to the
+    first loop; batch 2 onwards reached into a closed loop and died with
+    "Event loop is closed". Batch failures then failed the whole document, so
+    ANY document large enough to need more than one batch could not be
+    ingested — while single-batch documents worked, which is what hid it.
+    """
+
+    def test_a_second_event_loop_gets_a_working_pool(self):
+        from asgiref.sync import async_to_sync
+
+        client = EmbeddingClient()
+
+        async def grab():
+            return client._get_client()
+
+        first = async_to_sync(grab)()
+        second = async_to_sync(grab)()
+
+        self.assertIsNot(
+            first, second,
+            "the pool from the closed loop was handed out again; batch 2 of "
+            "every multi-batch document would fail with 'Event loop is closed'",
+        )
+        self.assertFalse(second.is_closed)
+
+    def test_closed_loop_pools_are_evicted_rather_than_accumulated(self):
+        from asgiref.sync import async_to_sync
+
+        client = EmbeddingClient()
+
+        async def grab():
+            return client._get_client()
+
+        for _ in range(5):
+            async_to_sync(grab)()
+
+        self.assertLessEqual(
+            len(client._clients), 2,
+            "one pool leaked per batch; a 40-batch document would hold 40 "
+            "connection pools open",
+        )
+
+    def test_sync_access_returns_the_pool_the_coroutine_then_uses(self):
+        """`.client` read before any await must be the object the call uses,
+        or `mock.patch.object(c.client, "post")` would patch a discarded pool
+        and every HTTP-mocking test here would silently exercise nothing."""
+        from asgiref.sync import async_to_sync
+
+        client = EmbeddingClient()
+        parked = client.client
+
+        async def grab():
+            return client._get_client()
+
+        self.assertIs(parked, async_to_sync(grab)())

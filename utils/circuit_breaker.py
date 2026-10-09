@@ -1,10 +1,13 @@
 import os
 import redis
 import time
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 redis_client = redis.from_url(
     os.getenv( "REDIS_URL", "redis://localhost:6379/0"),
-    decode_responses=True
+    decode_responses=True, socket_connect_timeout=1, socket_timeout=1,
+    retry=Retry(NoBackoff(), 0),
 )
 
 class CircuitBreaker:

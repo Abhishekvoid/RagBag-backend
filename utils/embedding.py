@@ -17,6 +17,7 @@ dimension — so a mismatch is a misconfigured provider or a silently swapped
 model, and it must fail loudly rather than corrupt the index.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -33,6 +34,7 @@ from tenacity import (
 from .circuit_breaker import tei_circuit_breaker
 from .llm_load_control import tei_slot_manager
 from .token_budget import BGE_MAX_TOKENS, bge_token_upper_bound
+from .deadline import stop_at_deadline, timeout_for, within_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -174,14 +176,81 @@ class EmbeddingClient:
     def __init__(self):
         self.cb = tei_circuit_breaker
         self.slot_manager = tei_slot_manager
-        self.client = httpx.AsyncClient(
+        # The httpx client is created PER EVENT LOOP, lazily, and never in
+        # __init__.
+        #
+        # An AsyncClient binds its connection pool to whichever loop first uses
+        # it. Ingestion calls `async_to_sync(client.embed_texts)(batch)` once per
+        # batch, and async_to_sync spins up a NEW loop for each call and closes
+        # it on return. So batch 1 filled the pool on loop A, loop A closed, and
+        # batch 2 reached for those same connections and died with "Event loop
+        # is closed" — every batch after the first, on every multi-batch
+        # document. Single-batch documents ingested fine, which is why this hid
+        # for so long: it only bit documents big enough to matter.
+        #
+        # Keying the pool by the running loop means each async_to_sync call gets
+        # a pool that belongs to its own loop, while a long-lived loop (ASGI,
+        # the query path) still reuses one pool across every request.
+        # Values are (loop, client). The LOOP is kept, not just its id, because
+        # eviction has to ask `loop.is_closed()` — an httpx client whose loop
+        # died still reports `is_closed == False`, so pruning on the client
+        # alone never fires and a 40-batch document would leak 40 pools.
+        self._clients: dict[int, tuple] = {}
+
+    def _new_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             timeout=EMBEDDING_TIMEOUT, limits=httpx.Limits(max_connections=100)
         )
 
+    def _get_client(self) -> httpx.AsyncClient:
+        try:
+            loop = asyncio.get_running_loop()
+            key = id(loop)
+        except RuntimeError:
+            # Reached from synchronous code — `EmbeddingClient().client` before
+            # any await. There is no loop to key on yet, so the pool is parked
+            # under None and adopted by whichever loop first uses it (below).
+            # This is the path tests take when they patch `.client.post` from a
+            # plain test method, and the patched object must be the very one the
+            # subsequent coroutine uses.
+            loop, key = None, None
+
+        entry = self._clients.get(key)
+        if entry is not None and not entry[1].is_closed:
+            return entry[1]
+
+        if key is not None and entry is None:
+            parked = self._clients.get(None)
+            if parked is not None and not parked[1].is_closed:
+                self._clients[key] = (loop, self._clients.pop(None)[1])
+                return self._clients[key][1]
+
+        client = self._new_client()
+        self._clients[key] = (loop, client)
+        # Evict pools whose loop has since closed, so a long-running worker does
+        # not accumulate one per batch.
+        for dead in [
+            k
+            for k, (lp, c) in self._clients.items()
+            if k != key and (c.is_closed or (lp is not None and lp.is_closed()))
+        ]:
+            self._clients.pop(dead, None)
+        return client
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """The connection pool for the caller's event loop.
+
+        Kept as `.client` so every existing call site — and the tests that patch
+        `.client.post` — work unchanged.
+        """
+        return self._get_client()
+
+    @within_deadline
     @retry(
         retry=retry_if_exception_type(EMBEDDING_ERRORS),
         wait=wait_exponential_jitter(initial=2, max=10),
-        stop=stop_after_attempt(5),
+        stop=stop_after_attempt(5) | stop_at_deadline,
     )
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
         if not texts:
@@ -190,7 +259,7 @@ class EmbeddingClient:
         if isinstance(texts, str):
             texts = [texts]
 
-        if self.cb.is_open():
+        if await asyncio.to_thread(self.cb.is_open):
             raise EmbeddingServiceUnavailable("embedding circuit is open")
 
         # The last line of defence, and the reason the call-site audit is a
@@ -214,6 +283,7 @@ class EmbeddingClient:
                 EMBEDDING_URL,
                 json=build_request(texts),
                 headers=auth_headers(),
+                timeout=timeout_for(EMBEDDING_TIMEOUT),
             )
 
             # Log the status only. Response bodies from an auth failure can echo
@@ -249,11 +319,20 @@ class EmbeddingClient:
                 EMBEDDING_PROVIDER,
             )
 
-            self.cb.record_success()
+            await asyncio.to_thread(self.cb.record_success)
             return embeddings
 
     async def close(self):
-        await self.client.aclose()
+        """Close every per-loop pool, not just the current loop's.
+
+        Going through `self.client` here would CREATE a pool for the calling
+        loop and then close that, leaving the pools that actually hold sockets
+        open — the opposite of what the caller asked for.
+        """
+        for _loop, client in list(self._clients.values()):
+            if not client.is_closed:
+                await client.aclose()
+        self._clients.clear()
 
 
 # Backwards-compatible alias: the class was TEI-specific before it grew adapters.

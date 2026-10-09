@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import Document, ChatMessage, ChatSession, Chapter, Subject, GenerateQuestion, GenerateFlashCards, Note, DocumentPage
 from utils.token_budget import check_embedding_length
+from django.core.files.storage import default_storage
+from storages.backends.s3 import S3Storage
 User = get_user_model()
 import logging
 
@@ -128,6 +130,17 @@ class DocumentSerializer(serializers.ModelSerializer):
 # ------------ chapter -----------------
 
 class DocumentPageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    def get_image_url(self, obj):
+        if not obj.s3_object_key:
+            # Unknown legacy URLs remain stored for repair, but are not served
+            # as if they were durable, authorized page assets.
+            return ""
+        if isinstance(default_storage, S3Storage):
+            return default_storage.url(obj.s3_object_key, expire=900)
+        return default_storage.url(obj.s3_object_key)
+
     class Meta:
         model = DocumentPage
         fields = ["page_number", "image_url", "reconstructed_md", "text_source"]
