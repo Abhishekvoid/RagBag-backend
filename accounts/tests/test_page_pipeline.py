@@ -110,16 +110,25 @@ class RenderBoundsTests(SimpleTestCase):
 
 
 class ChunkMetadataTest(TestCase):
-    def test_metadata_and_page_lookup(self):
+    def test_metadata_comes_from_the_chunked_page(self):
+        from types import SimpleNamespace
         from accounts import tasks
+        from accounts.rag_service import _to_result
+        from accounts.rag_pipeline import build_sources
         user = CustomUserModel.objects.create_user(email="c@d.com", password="x", name="C")
         doc = Document.objects.create(user=user, title="t", file="u/x.pdf", file_type="pdf")
-        page = DocumentPage.objects.create(document=doc, page_number=42,
+        DocumentPage.objects.create(document=doc, page_number=42, version=1,
                                            reconstructed_md="Mitochondria are the powerhouse of the cell",
                                            text_source=DocumentPage.SOURCE_VISION)
-        pages = [page]
-        n = tasks._page_for_chunk("Mitochondria are the powerhouse", pages)
-        meta = tasks.build_chunk_metadata(doc, "Mitochondria are the powerhouse", page_number=n)
+        tokenizer = SimpleNamespace(encode=list, decode="".join)
+        chunks = tasks._version_chunks(doc, "irrelevant global text", tokenizer, 1)
+        self.assertEqual(len(chunks), 1)
+        chunk_id, page, text = chunks[0]
+        meta = tasks.build_chunk_metadata(doc, text, page_number=page, version=1)
         self.assertEqual(meta["page_number"], 42)
         self.assertEqual(meta["document_id"], str(doc.id))
-        self.assertIsNone(tasks._page_for_chunk("nowhere on any page", pages))
+        result = _to_result({"id": chunk_id, "metadata": meta, "score": 0.9})
+        source = build_sources([result])[0]
+        self.assertEqual(source["page_number"], 42)
+        self.assertEqual(source["version"], 1)
+        self.assertEqual(source["document_id"], str(doc.id))

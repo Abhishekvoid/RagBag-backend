@@ -217,6 +217,49 @@ class VersionedIngestionTests(TestCase):
         self.assertTrue(any(key.endswith("p1_c0") for key, _, _ in first))
         self.assertTrue(any(key.endswith("p2_c0") for key, _, _ in first))
 
+    def test_page_boundaries_and_metadata_survive_dense_and_sparse_indexing(self):
+        pages = {number: "Chapter 4: Laws of Motion — repeated heading. " + word * 300
+                 for number, word in [(1, "ALPHA "), (2, "BETA ")]}
+        for number, text in pages.items():
+            DocumentPage.objects.create(document=self.doc, version=0,
+                                        page_number=number, reconstructed_md=text)
+        sparse = mock.Mock()
+        def dispatch(fn):
+            if fn.__name__ == "embed_texts":
+                return self.embed
+            return lambda texts, **kwargs: [{"indices": [1], "values": [1.0]} for _ in texts]
+        with mock.patch.object(tasks, "_sparse_index_or_none", return_value=sparse), \
+                mock.patch.object(tasks, "async_to_sync", side_effect=dispatch):
+            self.ingest()
+        self.doc.refresh_from_db()
+        dense_points = list(self.records.values())
+        sparse_points = [p for call in sparse.upsert.call_args_list for p in call.kwargs["vectors"]]
+        self.assertEqual({p["id"]: p["metadata"] for p in dense_points},
+                         {p["id"]: p["metadata"] for p in sparse_points})
+        self.assertEqual({p["metadata"]["page_number"] for p in dense_points}, {1, 2})
+        for point in dense_points:
+            metadata = point["metadata"]
+            self.assertIn(metadata["text"], pages[metadata["page_number"]])
+            self.assertEqual(metadata["document_id"], str(self.doc.id))
+            self.assertEqual(metadata["version"], self.doc.active_version)
+
+    def test_legacy_pdf_without_pages_is_extracted_before_reindex(self):
+        self.doc.file_type = "pdf"
+        self.doc.save(update_fields=["file_type"])
+        def extract(doc, *, version, **kwargs):
+            DocumentPage.objects.create(document=doc, version=version, page_number=1,
+                                        reconstructed_md="Recovered page. " * 25)
+            return "Recovered page. " * 25
+        with mock.patch.object(tasks, "extract_document_text", side_effect=extract) as extraction:
+            self.ingest()
+        extraction.assert_called_once()
+        self.assertTrue(all(p["metadata"]["page_number"] == 1 for p in self.records.values()))
+
+    def test_unpaginated_document_does_not_claim_page_zero(self):
+        self.ingest()
+        self.assertTrue(self.records)
+        self.assertTrue(all("page_number" not in p["metadata"] for p in self.records.values()))
+
     @override_settings(INDEX_VERSION_GRACE_SECONDS=3600)
     def test_cleanup_protects_active_pending_and_recent_versions(self):
         old = timezone.now() - timedelta(hours=2)

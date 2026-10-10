@@ -254,29 +254,16 @@ def build_chunk_metadata(document, chunk, page_number=None, *, version=None):
     }
     if document.chapter_id:
         metadata["chapter_id"] = str(document.chapter_id)
-    if page_number is not None:
+    if page_number is not None and page_number > 0:
         metadata["page_number"] = page_number
     if version is not None:
         metadata["version"] = version
     return metadata
 
 
-def _page_for_chunk(chunk, pages):
-    # ponytail: substring match on the chunk head; approximate (mis-tags repeated
-    # text / boundary-spanning chunks). Fine while the citation UI is deferred —
-    # upgrade to per-page chunking when exact page provenance is needed.
-    head = chunk.strip()[:40]
-    if not head:
-        return None
-    for p in pages:
-        if head in p.reconstructed_md:
-            return p.page_number
-    return None
-
-
 def _version_chunks(doc, text, tokenizer, version):
     """Chunk actual page text, so IDs never depend on a substring page guess."""
-    pages = list(doc.pages.filter(version=version))
+    pages = list(doc.pages.filter(version=version).order_by("page_number"))
     sources = [(p.page_number, strip_uncertainty_markers(p.reconstructed_md)) for p in pages]
     if not sources:
         sources = [(0, text)]
@@ -330,7 +317,8 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
             doc, revision = reserve_version(document_id, lease)
             vector_index, tokenizer, llm = _get_clients()
             push_ingestion_status(doc.user_id, doc.id, PHASE_READING)
-            if rescan or not doc.extracted_text:
+            if (rescan or not doc.extracted_text or
+                    (doc.file_type == "pdf" and not doc.pages.filter(version=doc.active_version).exists())):
                 text = extract_document_text(doc, version=revision.version, check_lease=lease.check)
             else:
                 text = doc.extracted_text
