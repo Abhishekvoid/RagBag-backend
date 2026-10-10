@@ -87,6 +87,9 @@ def build_answer_messages(context: str, query: str) -> list:
 # best few for the prompt. FINAL_CHUNKS * ~200 tokens is the context budget.
 RERANK_CANDIDATES = 20
 FINAL_CHUNKS = 8
+FALLBACK_ADVISORY = (
+    "I couldn't find this in the current chapter, but here is what I found in your other notes..."
+)
 
 VALID_INTENTS = ("greeting", "summary", "ambiguous", "question")
 
@@ -181,21 +184,27 @@ def parse_followups(raw: str) -> list:
 
 
 def build_sources(final_results) -> list:
-    """Distinct source chunks (by document_id, top 3) with a short snippet."""
+    """Keep each evidence page distinct, including its immutable index version."""
     seen = set()
     sources = []
     for r in final_results:
         payload = getattr(r, "payload", None) or {}
         doc_id = payload.get("document_id")
-        if not doc_id or doc_id in seen:
+        version = payload.get("version")
+        page = payload.get("page_number")
+        # Legacy page guesses and the unpaginated sentinel are not exact citations.
+        page = int(page) if version and page and page > 0 else None
+        key = (doc_id, version, page)
+        if not doc_id or key in seen:
             continue
-        seen.add(doc_id)
+        seen.add(key)
         sources.append({
             "document_id": str(doc_id),
             "snippet": (payload.get("text", "") or "")[:140],
+            "page_number": page,
+            "version": int(version) if version is not None else None,
+            "is_fallback_scope": bool(payload.get("is_fallback_scope", False)),
         })
-        if len(sources) >= 3:
-            break
     return sources
 
 
@@ -294,15 +303,18 @@ class RagPipeline:
 
         return any(re.search(rf"\b{greet}\b", query) for greet in greetings)
         
-    async def run(self, user_query, chat_history, chapter_id, user_id) -> PipelineResult:
+    async def run(self, user_query, chat_history, chapter_id, user_id, *,
+                  allow_library_fallback=False) -> PipelineResult:
         with deadline_scope(current_deadline() or RequestDeadline(CHAT_BUDGET)):
             try:
-                return await self._run(user_query, chat_history, chapter_id, user_id)
+                return await self._run(user_query, chat_history, chapter_id, user_id,
+                                       allow_library_fallback=allow_library_fallback)
             except DeadlineExceeded as exc:
                 return _failure(exc)
 
     @within_deadline
-    async def _run(self, user_query, chat_history, chapter_id, user_id) -> PipelineResult:
+    async def _run(self, user_query, chat_history, chapter_id, user_id, *,
+                   allow_library_fallback=False) -> PipelineResult:
         # step 1: contextualization
 
         request_id = str(uuid.uuid4())
@@ -346,6 +358,7 @@ class RagPipeline:
             else:
                 result = await self.handle_rag_search(
                     refined_query, chapter_id, user_id, request_id, original_query=user_query,
+                    allow_library_fallback=allow_library_fallback,
                 )
             
             status = result.outcome.value
@@ -597,7 +610,8 @@ class RagPipeline:
         return [q.strip("-• ") for q in expanded if q.strip()]
     
     async def handle_rag_search(self, query: str, chapter_id: str, user_id: str,
-                                request_id=None, *, original_query=None):
+                                request_id=None, *, original_query=None,
+                                allow_library_fallback=False):
        
 
         logger.info(f"starting RAg search for chapter{chapter_id}, user {user_id}")
@@ -663,23 +677,22 @@ class RagPipeline:
         logger.info("Searching vector database (hybrid + RRF...")
         try:
             search_filter = await sync_to_async(active_document_filter)(user_id, chapter_id)
-            if search_filter is None:
-                return _result("This chapter has no searchable material yet.",
-                               outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE)
-    
-            async with latency_tracker.track_async("vector_search"):
-                flat_results = await hybrid_search(
-                    all_embeddings,
-                    query_text=query,
-                    filter=search_filter,
-                    limit_per_vector=15,  # controls how many candidates are retrieved for each embedding
+            flat_results = []
+            if search_filter is not None:
+                async with latency_tracker.track_async("vector_search"):
+                    flat_results = await hybrid_search(
+                        all_embeddings, query_text=query, filter=search_filter,
+                        limit_per_vector=15,
+                    )
+            flat_results = [r for r in flat_results if ((r.payload or {}).get("text") or "").strip()]
+            for result in flat_results:
+                result.payload["is_fallback_scope"] = False
+
+            if not flat_results and allow_library_fallback is True:
+                logger.info("Chapter evidence empty; explicitly permitted search of other notes")
+                fallback_filter = await sync_to_async(active_document_filter)(
+                    user_id, exclude_chapter_id=chapter_id,
                 )
-                logger.info(f" Retrieved {len(flat_results)} fused results")
-
-            if not flat_results:
-                logger.warning("Strict filter failed → fallback to user_id only")
-
-                fallback_filter = await sync_to_async(active_document_filter)(user_id)
                 if fallback_filter is not None:
                     flat_results = await hybrid_search(
                         all_embeddings,
@@ -687,6 +700,8 @@ class RagPipeline:
                         filter=fallback_filter,
                         limit_per_vector=15,
                     )
+                    for result in flat_results:
+                        result.payload = dict(result.payload or {}, is_fallback_scope=True)
 
       
 
@@ -701,7 +716,10 @@ class RagPipeline:
                     logger.error(" First result has no payload!")
             else:
                 logger.error(" NO RESULTS returned from vector search!")
-                return _result("I couldn't find relevant information in your document.",
+                message = ("I couldn't find relevant information in this chapter or your other notes."
+                           if allow_library_fallback else
+                           "I couldn't find relevant information in the current chapter.")
+                return _result(message,
                                outcome=PipelineOutcome.INSUFFICIENT_EVIDENCE)
         except Exception as e:
             logger.error(f" Vector search failed: {e}", exc_info=True)
@@ -712,8 +730,10 @@ class RagPipeline:
         unique_results = []
         for r in flat_results:
             text = r.payload.get("text") if r.payload else None
-            if text and text not in seen:
-                seen.add(text)
+            key = (r.payload.get("document_id"), r.payload.get("version"),
+                   r.payload.get("page_number"), text) if r.payload else None
+            if text and text.strip() and key not in seen:
+                seen.add(key)
                 unique_results.append(r)
 
         logger.info(f"Deduped: {len(unique_results)} chunks")
@@ -778,6 +798,8 @@ class RagPipeline:
             logger.info(f" Response preview: {raw_output[:200]}...")
 
             formatted_output = enforce_markdown_spacing(raw_output)
+            if any(r.payload.get("is_fallback_scope") for r in final_results):
+                formatted_output = FALLBACK_ADVISORY + "\n\n" + formatted_output
 
             sources = build_sources(final_results)
             followups = await self._generate_followups(query, formatted_output)

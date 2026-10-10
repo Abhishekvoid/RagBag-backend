@@ -126,7 +126,7 @@ def fail_version(document_id, revision, lease, error):
         doc.save(update_fields=["pending_version", "ingestion_token", "error_message", "status"])
 
 
-def active_document_filter(user_id, chapter_id=None):
+def active_document_filter(user_id, chapter_id=None, *, exclude_chapter_id=None):
     """Snapshot allowed document/version pairs, including the legacy baseline.
 
     Return None for no readable documents; callers must not send an unfiltered
@@ -137,6 +137,8 @@ def active_document_filter(user_id, chapter_id=None):
     )
     if chapter_id is not None:
         docs = docs.filter(chapter_id=chapter_id)
+    if exclude_chapter_id is not None:
+        docs = docs.exclude(chapter_id=exclude_chapter_id)
     clauses = []
     for doc_id, version in docs.values_list("id", "active_version"):
         clauses.append({"$and": [

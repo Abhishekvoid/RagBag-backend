@@ -213,6 +213,13 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'citations', 'tokens', 'error', 'suggestions', 'is_unanswered']
 
 
+class ExplicitBooleanField(serializers.BooleanField):
+    def to_internal_value(self, data):
+        if type(data) is not bool:
+            self.fail("invalid", input=data)
+        return data
+
+
 class RAGChatMessageSerializer(serializers.Serializer):
     """The one door user text walks through on its way to the embedding API.
 
@@ -225,6 +232,7 @@ class RAGChatMessageSerializer(serializers.Serializer):
 
     chapter = serializers.UUIDField()
     text = serializers.CharField()
+    allow_library_fallback = ExplicitBooleanField(default=False)
 
     def validate_text(self, value):
         problem = check_embedding_length(value)

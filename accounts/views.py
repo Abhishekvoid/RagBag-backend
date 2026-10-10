@@ -572,6 +572,7 @@ class RAGChatMessageView(APIView):
                 chat_history=list(history),
                 chapter_id=str(chapter_id),
                 user_id=user.id,
+                allow_library_fallback=validated_data["allow_library_fallback"],
             )
 
             failure_status = {
@@ -601,14 +602,16 @@ class RAGChatMessageView(APIView):
 
             # Enrich source chips with a human title (sync DB is fine here).
             doc_ids = [s["document_id"] for s in sources]
-            titles = {
-                str(pk): title
-                for pk, title in Document.objects.filter(
-                    id__in=doc_ids
-                ).values_list("id", "title")
+            source_documents = {
+                str(pk): (title, chapter)
+                for pk, title, chapter in Document.objects.filter(
+                    id__in=doc_ids, user=user,
+                ).values_list("id", "title", "chapter_id")
             }
             for s in sources:
-                s["title"] = titles.get(s["document_id"], "Source")
+                title, chapter = source_documents.get(s["document_id"], ("Source", None))
+                s["title"] = title
+                s["chapter_id"] = str(chapter) if chapter else None
 
             # Persist both sides together, only after a conversational result.
             with transaction.atomic():
@@ -1061,9 +1064,17 @@ class DocumentPagesView(generics.ListAPIView):
     """GET /auth/documents/<id>/pages/ — the reconstructed pages of an owned document."""
     serializer_class = DocumentPageSerializer
 
-    def get_queryset(self):
-        doc = get_object_or_404(Document, id=self.kwargs["id"], user=self.request.user)
-        return doc.pages.filter(version=doc.active_version)
+    def list(self, request, *args, **kwargs):
+        doc = get_object_or_404(Document, id=self.kwargs["id"], user=request.user)
+        version = request.query_params.get("version")
+        if version is not None:
+            if not version.isdecimal():
+                return Response({"error": "Invalid source version."}, status=400)
+            if int(version) != doc.active_version:
+                return Response({"error": "This source has changed since the answer was written. Ask again for an updated citation."}, status=409)
+        # Use the same version snapshot for validation and page selection.
+        pages = doc.pages.filter(version=doc.active_version)
+        return Response(self.get_serializer(pages, many=True).data)
 
 
 class DocumentRescanView(APIView):

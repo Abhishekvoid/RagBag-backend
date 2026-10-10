@@ -50,10 +50,78 @@ class ChatPipelineOutcomeTests(APITestCase):
             self.dependencies[target.rsplit(".", 1)[-1]] = patcher.start()
             self.addCleanup(patcher.stop)
 
-    def post_chat(self):
+    def post_chat(self, **options):
         return self.client.post("/auth/rag-chat/", {
             "chapter": str(self.chapter.id), "text": "Explain gravity",
+            **options,
+        }, format="json")
+
+    def test_empty_chapter_does_not_search_other_notes_by_default(self):
+        self.dependencies["hybrid_search"].side_effect = [[], self.hits]
+        response = self.post_chat()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["is_unanswered"])
+        self.assertEqual(response.data["sources"], [])
+        self.dependencies["hybrid_search"].assert_awaited_once()
+        self.dependencies["_generate_followups"].assert_not_awaited()
+        # Only expansion may call the LLM; answer synthesis must not run.
+        self.assertEqual(self.dependencies["ask_llm"].await_count, 1)
+
+    def test_explicit_false_does_not_widen_scope(self):
+        self.dependencies["hybrid_search"].side_effect = [[], self.hits]
+        self.assertEqual(self.post_chat(allow_library_fallback=False).status_code, 200)
+        self.dependencies["hybrid_search"].assert_awaited_once()
+
+    def test_opt_in_keeps_successful_chapter_search_in_scope(self):
+        response = self.post_chat(allow_library_fallback=True)
+        self.assertEqual(response.data["text"], "An answer")
+        self.assertFalse(response.data["sources"][0]["is_fallback_scope"])
+        self.dependencies["hybrid_search"].assert_awaited_once()
+
+    def test_empty_other_notes_remain_unanswered(self):
+        chapter = Chapter.objects.create(user=self.user, name="Other")
+        Document.objects.create(user=self.user, chapter=chapter, title="Notes", active_version=1)
+        self.dependencies["hybrid_search"].return_value = []
+        response = self.post_chat(allow_library_fallback=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sources"], [])
+        self.assertTrue(response.data["is_unanswered"])
+        self.assertEqual(self.dependencies["hybrid_search"].await_count, 2)
+
+    def test_provider_failure_never_triggers_fallback(self):
+        self.dependencies["hybrid_search"].side_effect = TimeoutError("down")
+        self.assertEqual(self.post_chat(allow_library_fallback=True).status_code, 504)
+        self.dependencies["hybrid_search"].assert_awaited_once()
+
+    def test_legacy_page_guess_is_only_a_document_citation(self):
+        self.hits[0].payload["page_number"] = 2
+        source = self.post_chat().data["sources"][0]
+        self.assertIsNone(source["page_number"])
+        self.assertIsNone(source["version"])
+
+    def test_empty_chunk_text_counts_as_no_evidence(self):
+        for text in ("   ", None):
+            self.hits[0].payload["text"] = text
+            self.dependencies["hybrid_search"].reset_mock()
+            self.assertTrue(self.post_chat().data["is_unanswered"])
+            self.dependencies["hybrid_search"].assert_awaited_once()
+
+    def test_fallback_requires_an_actual_boolean(self):
+        for value in ("true", 1, [], None):
+            self.assertEqual(self.post_chat(allow_library_fallback=value).status_code, 400)
+        self.dependencies["hybrid_search"].assert_not_awaited()
+
+    def test_page_citations_survive_response_and_history(self):
+        self.hits[0].payload.update(page_number=2, version=3)
+        second = SimpleNamespace(id="page3", score=0.9, payload={
+            **self.hits[0].payload, "page_number": 3, "text": "Another page. " * 20,
         })
+        self.hits.append(second)
+        response = self.post_chat()
+        self.assertEqual([s["page_number"] for s in response.data["sources"]], [2, 3])
+        self.assertTrue(all(s["version"] == 3 for s in response.data["sources"]))
+        saved = ChatMessageSerializer(ChatMessage.objects.get(sender="ai")).data
+        self.assertEqual(saved["citations"], response.data["sources"])
 
     def test_dependency_failures_are_not_saved_as_answers(self):
         request = httpx.Request("POST", "https://dependency.invalid")
@@ -200,13 +268,26 @@ class ChatPipelineOutcomeTests(APITestCase):
         self.document.active_version = 4
         self.document.pending_version = 5
         self.document.save(update_fields=["active_version", "pending_version"])
+        other_chapter = Chapter.objects.create(user=self.user, name="Other notes")
+        other = Document.objects.create(user=self.user, chapter=other_chapter,
+                                        title="Physics", status=Document.STATUS_COMPLETED,
+                                        active_version=2)
+        foreign_user = CustomUserModel.objects.create_user(email="other@test.com", password="x")
+        Document.objects.create(user=foreign_user, title="Private", active_version=1)
+        self.hits[0].payload.update(document_id=str(other.id), chapter_id=str(other_chapter.id),
+                                    page_number=1, version=2)
         self.dependencies["hybrid_search"].side_effect = [[], self.hits]
-        self.assertEqual(self.post_chat().status_code, 201)
+        response = self.post_chat(allow_library_fallback=True)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["text"].startswith(
+            "I couldn't find this in the current chapter, but here is what I found in your other notes..."))
+        self.assertTrue(response.data["sources"][0]["is_fallback_scope"])
+        self.assertEqual(response.data["sources"][0]["chapter_id"], str(other_chapter.id))
         calls = self.dependencies["hybrid_search"].call_args_list
         self.assertEqual(len(calls), 2)
-        for call in calls:
+        for call, document, version in zip(calls, [self.document, other], [4, 2]):
             scope = call.kwargs["filter"]["$and"]
             self.assertEqual(scope[0], {"user_id": {"$eq": str(self.user.id)}})
             self.assertEqual(scope[1]["$or"], [{"$and": [
-                {"document_id": {"$eq": str(self.document.id)}}, {"version": {"$eq": 4}},
+                {"document_id": {"$eq": str(document.id)}}, {"version": {"$eq": version}},
             ]}])

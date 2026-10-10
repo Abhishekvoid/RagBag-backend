@@ -63,6 +63,18 @@ class PageKeysTests(TestCase):
     def test_unknown_legacy_url_is_not_served(self):
         self.assertEqual(DocumentPageSerializer(self.page).data["image_url"], "")
 
+    def test_citation_version_is_checked_before_serving_pages(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        url = f"/auth/documents/{self.doc.id}/pages/"
+        self.assertEqual(client.get(url, {"version": 1}).status_code, 200)
+        self.assertEqual(client.get(url, {"version": 0}).status_code, 409)
+        self.assertEqual(client.get(url, {"version": 2}).status_code, 409)
+        self.assertEqual(client.get(url, {"version": "invalid"}).status_code, 400)
+        other = CustomUserModel.objects.create_user(email="version-other@test.com", name="F", password="x")
+        client.force_authenticate(other)
+        self.assertEqual(client.get(url, {"version": 0}).status_code, 404)
+
     def test_api_signs_only_owned_active_pages_on_every_read(self):
         self.page.s3_object_key = self.key
         self.page.save()
