@@ -31,7 +31,8 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from .circuit_breaker import tei_circuit_breaker
+from .circuit_breaker import tei_circuit_breaker, ServiceUnavailable
+from .service_control import async_attempt
 from .llm_load_control import tei_slot_manager
 from .token_budget import BGE_MAX_TOKENS, bge_token_upper_bound
 from .deadline import stop_at_deadline, timeout_for, within_deadline
@@ -72,8 +73,7 @@ EMBEDDING_ERRORS = (
 )
 
 
-class EmbeddingServiceUnavailable(Exception):
-    pass
+EmbeddingServiceUnavailable = ServiceUnavailable
 
 
 class EmbeddingDimensionMismatch(ValueError):
@@ -259,9 +259,6 @@ class EmbeddingClient:
         if isinstance(texts, str):
             texts = [texts]
 
-        if await asyncio.to_thread(self.cb.is_open):
-            raise EmbeddingServiceUnavailable("embedding circuit is open")
-
         # The last line of defence, and the reason the call-site audit is a
         # one-liner: every path into the embedding API passes through here, so
         # no caller — present or future — can send input the model would
@@ -276,14 +273,14 @@ class EmbeddingClient:
                     f"with utils.token_budget.split_for_embedding first"
                 )
 
-        async with self.slot_manager.slot():
+        async with async_attempt(self.slot_manager, self.cb) as attempt:
             start = time.perf_counter()
 
             response = await self.client.post(
                 EMBEDDING_URL,
                 json=build_request(texts),
                 headers=auth_headers(),
-                timeout=timeout_for(EMBEDDING_TIMEOUT),
+                timeout=attempt.timeout(EMBEDDING_TIMEOUT),
             )
 
             # Log the status only. Response bodies from an auth failure can echo
@@ -319,7 +316,6 @@ class EmbeddingClient:
                 EMBEDDING_PROVIDER,
             )
 
-            await asyncio.to_thread(self.cb.record_success)
             return embeddings
 
     async def close(self):

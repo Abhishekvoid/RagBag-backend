@@ -1,3 +1,6 @@
+from utils.service_control import sync_attempt
+from utils.llm_load_control import llm_slot_manager
+from utils.circuit_breaker import llm_circuit_breaker
 import os
 import logging
 import tiktoken
@@ -248,6 +251,7 @@ def extract_document_text(doc, *, version=None, check_lease=lambda: None):
 def build_chunk_metadata(document, chunk, page_number=None, *, version=None):
     metadata = {
         "text": chunk,
+        "incomplete_coverage": bool(document.coverage_audit),
         "document_id": str(document.id),
         "user_id": str(document.user_id),
         "file_type": document.file_type,
@@ -264,8 +268,8 @@ def build_chunk_metadata(document, chunk, page_number=None, *, version=None):
 def _version_chunks(doc, text, tokenizer, version):
     """Chunk actual page text, so IDs never depend on a substring page guess."""
     pages = list(doc.pages.filter(version=version).order_by("page_number"))
-    sources = [(p.page_number, strip_uncertainty_markers(p.reconstructed_md)) for p in pages]
-    if not sources:
+    sources = [(p.page_number, strip_uncertainty_markers(p.reconstructed_md)) for p in pages if not p.needs_review]
+    if not pages:
         sources = [(0, text)]
     prepared = []
     for page_number, content in sources:
@@ -327,9 +331,12 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
                     DocumentPage(document=doc, version=revision.version,
                                  page_number=p.page_number, image_url=p.image_url,
                                  s3_object_key=p.s3_object_key,
-                                 reconstructed_md=p.reconstructed_md, text_source=p.text_source)
+                                 reconstructed_md=p.reconstructed_md, text_source=p.text_source,
+                                 needs_review=p.needs_review, review_reason=p.review_reason)
                     for p in doc.pages.filter(version=doc.active_version)
                 ])
+            from .coverage import record_coverage
+            record_coverage(doc, revision, lease)
             if not text.strip():
                 raise ValueError("No text available for ingestion")
             revision.extracted_text = text
@@ -340,15 +347,16 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
                     chapter = Chapter.objects.get(id=chapter_id, user_id=doc.user_id)
                     title = doc.title
                 else:
-                    completion = llm.chat.completions.create(
-                        model=LLM_MODEL, max_tokens=1000,
-                        timeout=timeout_for(45),
-                        messages=[{"role": "user", "content":
-                                   "Give this study material a short title (4-5 words), without quotes:\n" + text[:4000]}],
-                    )
-                    title = (completion.choices[0].message.content or "").strip().strip('"')
-                    if not title:
-                        raise ValueError("Chapter title generation returned no text")
+                    with sync_attempt(llm_slot_manager, llm_circuit_breaker) as attempt:
+                        completion = llm.chat.completions.create(
+                            model=LLM_MODEL, max_tokens=1000,
+                            timeout=attempt.timeout(45),
+                            messages=[{"role": "user", "content":
+                                       "Give this study material a short title (4-5 words), without quotes:\n" + text[:4000]}],
+                        )
+                        title = (completion.choices[0].message.content or "").strip().strip('"')
+                        if not title:
+                            raise ValueError("Chapter title generation returned no text")
                     chapter = None
                 with transaction.atomic():
                     current = Document.objects.select_for_update().get(id=doc.id)
@@ -442,7 +450,7 @@ def process_document_ingestion(self, document_id: str, *, rescan=False, chapter_
 
     _queue_version_cleanup(document_id)
     push_ingestion_status(doc.user_id, doc.id, PHASE_READY,
-                          chapter_id=doc.chapter_id, title=doc.title)
+                          chapter_id=doc.chapter_id, title=doc.title, coverage_audit=doc.coverage_audit)
     # Notification/broker failures must never retry an already published version.
     try:
         channel_layer = get_channel_layer()

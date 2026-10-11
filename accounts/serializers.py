@@ -47,10 +47,10 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = Document
         fields = [
             "id", "chapter", "user", "title", "file", "file_type", 
-            "size_bytes", "status", "error_message", "created_at", "updated_at"
+            "size_bytes", "status", "error_message", "created_at", "updated_at", "coverage_audit", "active_coverage", "active_version"
         ]
         # Make 'title' and 'chapter' optional in the API
-        read_only_fields = ("user", "file_type", "size_bytes","status", "error_message", "created_at", "updated_at")
+        read_only_fields = ("user", "file_type", "size_bytes","status", "error_message", "created_at", "updated_at", "coverage_audit", "active_coverage", "active_version")
         extra_kwargs = {
             'title': {'required': False},
            
@@ -143,7 +143,7 @@ class DocumentPageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DocumentPage
-        fields = ["page_number", "image_url", "reconstructed_md", "text_source"]
+        fields = ["page_number", "image_url", "reconstructed_md", "text_source", "needs_review", "review_reason"]
 
 
 class ChapterWriteSerializer(serializers.ModelSerializer):

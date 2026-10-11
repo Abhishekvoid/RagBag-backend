@@ -52,6 +52,41 @@ class VersionedIngestionTests(TestCase):
     def ingest(self, **kwargs):
         return tasks.process_document_ingestion.run(str(self.doc.id), **kwargs)
 
+    def test_partial_scan_publishes_only_readable_pages_with_audit(self):
+        def extract(doc, *, version, **kwargs):
+            DocumentPage.objects.create(document=doc, version=version, page_number=1,
+                reconstructed_md="Useful coaching material " * 20)
+            DocumentPage.objects.create(document=doc, version=version, page_number=2,
+                reconstructed_md="unreadable", needs_review=True, review_reason="Too little text")
+            return "Useful coaching material " * 20
+        with mock.patch.object(tasks, "extract_document_text", side_effect=extract):
+            self.ingest(rescan=True)
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.active_version, 1)
+        self.assertEqual(self.doc.active_coverage, self.doc.coverage_audit)
+        self.assertEqual(self.doc.active_coverage["pages"][0]["page_number"], 2)
+        self.assertTrue(self.records)
+        for record in self.records.values():
+            self.assertEqual(record["metadata"]["page_number"], 1)
+            self.assertTrue(record["metadata"]["incomplete_coverage"])
+
+    def test_blank_rebuild_retains_previous_version_and_latest_audit(self):
+        old_text = self.doc.extracted_text
+        def extract(doc, *, version, **kwargs):
+            DocumentPage.objects.create(document=doc, version=version, page_number=1,
+                needs_review=True, review_reason="OCR unavailable")
+            return ""
+        with mock.patch.object(tasks, "extract_document_text", side_effect=extract):
+            with self.assertRaises(ValueError):
+                self.ingest(rescan=True)
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.extracted_text, old_text)
+        self.assertEqual(self.doc.status, Document.STATUS_COMPLETED)
+        self.assertEqual(self.doc.active_version, 0)
+        self.assertEqual(self.doc.active_coverage, {})
+        self.assertEqual(self.doc.coverage_audit["code"], "INCOMPLETE_COVERAGE")
+        self.index.upsert.assert_not_called()
+
     def test_reindex_copies_durable_page_key(self):
         key = f"{self.user.id}/pages/{self.doc.id}/p1_original.png"
         DocumentPage.objects.create(document=self.doc, version=0, page_number=1,

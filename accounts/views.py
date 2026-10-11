@@ -13,7 +13,9 @@ from django.db import transaction
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
 from .models import ChatMessage, ChatSession, Document, Subject, Chapter, GenerateQuestion, GenerateFlashCards, Note
-from utils.circuit_breaker import llm_circuit_breaker, tei_circuit_breaker
+from utils.circuit_breaker import llm_circuit_breaker, tei_circuit_breaker, ServiceUnavailable
+from utils.llm_load_control import llm_slot_manager
+from utils.service_control import sync_attempt
 from utils.metrics.latency import latency_tracker
 from utils.metrics.cost import cost_tracker
 from utils.metrics.retrieval import retrieval_evaluator
@@ -51,14 +53,14 @@ class LLMUnavailable(Exception):
     client is unconfigured; views translate this to a 503."""
 
 
-def _invoke_sync(client, messages, *, model, json_mode):
+def _invoke_sync(client, messages, *, model, json_mode, timeout=45):
     """One sync provider call. Returns content, or raises if it is empty.
 
     An OpenRouter model without response_format support answers a JSON-mode
     request with a 200 whose content is None, so an explicit check keeps that
     from reaching json.loads() as a confusing TypeError.
     """
-    kwargs = {"messages": messages, "model": model}
+    kwargs = {"messages": messages, "model": model, "timeout": timeout}
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     completion = client.chat.completions.create(**kwargs)
@@ -73,17 +75,12 @@ def _guarded_llm(messages, *, json_mode):
     llm_gateway used by the RAG pipeline, but for these sync HTTP views)."""
     if llm_client is None:
         raise LLMUnavailable("LLM client is not configured.")
-    if not llm_circuit_breaker.allow_request():
-        raise LLMUnavailable("LLM is temporarily unavailable. Please retry shortly.")
-
     try:
-        content = _invoke_sync(llm_client, messages,
-                               model=LLM_MODEL, json_mode=json_mode)
-        llm_circuit_breaker.record_success()
-        return content
-    except Exception:
-        llm_circuit_breaker.record_failure()
-        raise
+        with sync_attempt(llm_slot_manager, llm_circuit_breaker) as attempt:
+            return _invoke_sync(llm_client, messages, model=LLM_MODEL,
+                                json_mode=json_mode, timeout=attempt.timeout(45))
+    except ServiceUnavailable as exc:
+        raise LLMUnavailable("LLM is temporarily unavailable. Please retry shortly.") from exc
 
 
 def llm_json(prompt):
@@ -180,8 +177,8 @@ class MetricsView(APIView):
         # payload, since that is exactly when someone is reading this endpoint.
         try:
             breakers = {
-                "llm": "open" if llm_circuit_breaker.is_open() else "closed",
-                "tei_embedding": "open" if tei_circuit_breaker.is_open() else "closed",
+                "llm": llm_circuit_breaker.state(),
+                "tei_embedding": tei_circuit_breaker.state(),
             }
         except Exception:
             logger.warning("circuit breaker state unavailable", exc_info=True)

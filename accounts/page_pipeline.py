@@ -2,6 +2,8 @@
 import logging
 import tempfile
 import uuid
+import io
+import os
 from contextlib import closing
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from django.core.files.base import ContentFile
 import fitz  # PyMuPDF — renders pages to images with no external binary (unlike poppler)
 
 from .models import Document, DocumentPage
-from utils.deadline import check_deadline
+from utils.deadline import check_deadline, timeout_for, DeadlineExceeded
 from .vision_ocr import (
     VISION_ENABLED, VISION_MAX_PAGES,
     page_needs_vision, reconstruct_page_markdown, strip_uncertainty_markers,
@@ -43,7 +45,7 @@ def render_pdf_pages(pdf_path, dpi: int = 150):
                 scale = min(scale, 2048 / max(page.rect.width, page.rect.height))
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale),
                                       colorspace=fitz.csRGB, alpha=False)
-                yield number + 1, total, page.get_text(), pix.tobytes("png")
+                yield number + 1, total, page.get_text(), pix.tobytes("png"), bool(page.get_image_info())
             finally:
                 pix = None
                 page = None
@@ -53,6 +55,48 @@ def store_page_image(document: Document, page_number: int, png_bytes: bytes) -> 
     """Persist a rendered page image; return the durable storage key."""
     name = f"{document.user_id}/pages/{document.id}/p{page_number}_{uuid.uuid4().hex[:8]}.png"
     return default_storage.save(name, ContentFile(png_bytes))
+
+
+def local_ocr(png: bytes) -> str:
+    """Tesseract is an existing image dependency; kill it when the budget expires."""
+    import pytesseract
+    from PIL import Image
+    with Image.open(io.BytesIO(png)) as image:
+        result = pytesseract.image_to_string(
+            image, lang=os.getenv("OCR_LANGUAGES", "eng"),
+            timeout=timeout_for(float(os.getenv("OCR_TIMEOUT", "20"))),
+        )
+    check_deadline()
+    return result.strip()
+
+
+def readable_length(text):
+    return sum(c.isalnum() for c in strip_uncertainty_markers(text))
+
+
+def extract_page(layer, png, page_number, has_image):
+    md, source, reason = layer.strip(), DocumentPage.SOURCE_LAYER, ""
+    if page_needs_vision(layer):
+        if VISION_ENABLED and page_number <= VISION_MAX_PAGES:
+            try:
+                md = reconstruct_page_markdown(png, page_number=page_number)
+                source = DocumentPage.SOURCE_VISION
+            except VisionUnavailable:
+                source = DocumentPage.SOURCE_FALLBACK
+        if has_image and (readable_length(md) < 20 or page_needs_vision(md)):
+            try:
+                recovered = local_ocr(png)
+                if readable_length(recovered) > readable_length(md):
+                    md, source = recovered, DocumentPage.SOURCE_OCR
+            except DeadlineExceeded:
+                raise
+            except Exception:
+                # No provider exception text enters the persisted/public warning.
+                check_deadline()
+                reason = "Local OCR unavailable or timed out"
+                logger.warning("Local OCR failed for page %s", page_number, exc_info=True)
+    needs_review = has_image and readable_length(md) < 20
+    return md, source, needs_review, (reason or "Too little readable text after extraction") if needs_review else ""
 
 
 def build_document_pages(document: Document, *, version=None, check_lease=lambda: None) -> int:
@@ -67,26 +111,17 @@ def build_document_pages(document: Document, *, version=None, check_lease=lambda
                 check_deadline()
                 target.write(chunk)
         with closing(render_pdf_pages(pdf_path)) as pages:
-            for page_number, total, layer, png in pages:
+            for page_number, total, layer, png, has_image in pages:
                 check_deadline()
                 check_lease()
-                use_vision = (VISION_ENABLED and page_number <= VISION_MAX_PAGES
-                              and page_needs_vision(layer))
                 object_key = store_page_image(document, page_number, png)
-                if use_vision:
-                    try:
-                        md = reconstruct_page_markdown(png, page_number=page_number)
-                        text_source = DocumentPage.SOURCE_VISION
-                    except VisionUnavailable:
-                        md = layer.strip()
-                        text_source = DocumentPage.SOURCE_FALLBACK
-                else:
-                    md = layer.strip()
-                    text_source = DocumentPage.SOURCE_LAYER
+                md, text_source, needs_review, reason = extract_page(layer, png, page_number, has_image)
+                check_lease()
                 DocumentPage.objects.update_or_create(
                     document=document, version=version, page_number=page_number,
                     defaults={"s3_object_key": object_key, "image_url": "",
-                              "reconstructed_md": md, "text_source": text_source},
+                              "reconstructed_md": md, "text_source": text_source,
+                              "needs_review": needs_review, "review_reason": reason},
                 )
                 del png
                 push_ingestion_status(document.user_id, document.id, PHASE_PAGE,
@@ -98,5 +133,5 @@ def canonical_text_for_document(document: Document, *, version=None) -> str:
     """Concatenate pages' reconstructed markdown (markers stripped) for RAG/flashcards."""
     version = document.active_version if version is None else version
     parts = [strip_uncertainty_markers(p.reconstructed_md)
-             for p in document.pages.filter(version=version) if p.reconstructed_md.strip()]
+             for p in document.pages.filter(version=version, needs_review=False) if p.reconstructed_md.strip()]
     return "\n\n".join(parts)

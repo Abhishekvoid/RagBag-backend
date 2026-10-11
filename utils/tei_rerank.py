@@ -13,6 +13,9 @@ would burn three retries and a timeout on every single query.
 import os
 import logging
 import httpx
+from .service_control import async_attempt
+from .circuit_breaker import rerank_circuit_breaker
+from .llm_load_control import rerank_slot_manager
 from .deadline import DeadlineExceeded, stop_at_deadline, timeout_for, within_deadline
 from tenacity import (
     retry,
@@ -43,13 +46,14 @@ class TEIRerankClient:
         reraise=True,
     )
     async def _post(self, query: str, texts: list) -> list:
-        response = await self.client.post(
-            RERANK_URL,
-            json={"query": query, "texts": texts},
-            timeout=timeout_for(RERANK_TIMEOUT),
-        )
-        response.raise_for_status()
-        return response.json()
+        async with async_attempt(rerank_slot_manager, rerank_circuit_breaker) as attempt:
+            response = await self.client.post(
+                RERANK_URL,
+                json={"query": query, "texts": texts},
+                timeout=attempt.timeout(RERANK_TIMEOUT),
+            )
+            response.raise_for_status()
+            return response.json()
 
     @within_deadline
     async def rerank(self, query: str, texts: list):

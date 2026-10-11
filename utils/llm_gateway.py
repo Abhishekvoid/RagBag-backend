@@ -1,10 +1,8 @@
 from .llm_wrapper import _call_llm_with_retry
-from .circuit_breaker import llm_circuit_breaker
+from .circuit_breaker import ServiceUnavailable
 import logging
-from .llm_load_control import SystemOverload, llm_slot_manager
 from .metrics.cost import cost_tracker
 from .deadline import DeadlineExceeded, within_deadline
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -16,61 +14,51 @@ class LLMUnavailable(Exception):
 @within_deadline
 async def ask_llm(client, messages, *, model, json_mode=False, **kwargs):
 
-    # circuit breaker gate
-    if await asyncio.to_thread(llm_circuit_breaker.is_open):
-        logger.warning("LLM circuit OPEN - blocking request")
-        raise LLMUnavailable("LLM temporarily unavailable")
-
     try:
-        async with llm_slot_manager.slot():
+        response = await _call_llm_with_retry(
+            client,
+            messages=messages,
+            model=model,
+            json_mode=json_mode,
+            **kwargs
+        )
 
-            response = await _call_llm_with_retry(
-                client,
-                messages=messages,
-                model=model,
-                json_mode=json_mode,
-                **kwargs
-            )
+        try:
+            usage = getattr(response, "usage", None)
 
-            try:
-                usage = getattr(response, "usage", None)
+            if usage:
+                input_tokens = getattr(usage, "prompt_tokens", 0)
+                output_tokens = getattr(usage, "completion_tokens", 0)
 
-                if usage:
-                    input_tokens = getattr(usage, "prompt_tokens", 0)
-                    output_tokens = getattr(usage, "completion_tokens", 0)
+                cost_data = cost_tracker.track(
+                    model= model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens
+                )
 
-                    cost_data = cost_tracker.track(
-                        model= model,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens
-                    )
-
-                    logger.info(
-                        "llm_cost_tracker",
-                        extra={
-                            "stage": kwargs.get("stage", "unknown"),
-                            "model": model,
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                            "cost_usd": cost_data["cost_usd"],
-                            "daily_total": cost_data["daily_total"],
-                        }
-                    )
-            except Exception:
-                logger.warning("cost tracking failed", exc_info=True)
-            # success → reset breaker
-            await asyncio.to_thread(llm_circuit_breaker.record_success)
-            return response
+                logger.info(
+                    "llm_cost_tracker",
+                    extra={
+                        "stage": kwargs.get("stage", "unknown"),
+                        "model": model,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cost_usd": cost_data["cost_usd"],
+                        "daily_total": cost_data["daily_total"],
+                    }
+                )
+        except Exception:
+            logger.warning("cost tracking failed", exc_info=True)
+        return response
 
     except DeadlineExceeded:
         raise
 
-    except SystemOverload:
+    except ServiceUnavailable:
         raise LLMUnavailable("system under heavy load")
 
     except Exception:
 
-        await asyncio.to_thread(llm_circuit_breaker.record_failure)
 
         logger.exception(
             "LLM call failed",

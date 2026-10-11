@@ -108,7 +108,8 @@ def activate_version(document_id, revision, lease):
         doc.extracted_text = revision.extracted_text
         doc.status = Document.STATUS_COMPLETED
         doc.error_message = None
-        doc.save(update_fields=["active_version", "pending_version", "ingestion_token", "extracted_text", "status", "error_message"])
+        doc.active_coverage = revision.coverage_audit
+        doc.save(update_fields=["active_version", "pending_version", "ingestion_token", "extracted_text", "status", "error_message", "active_coverage"])
 
 
 def fail_version(document_id, revision, lease, error):

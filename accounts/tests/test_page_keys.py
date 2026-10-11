@@ -105,7 +105,7 @@ class PageKeyMigrationTests(TransactionTestCase):
         after = [("accounts", "0013_documentpage_s3_object_key")]
         executor = MigrationExecutor(connection)
         executor.migrate(before)
-        self.addCleanup(lambda: MigrationExecutor(connection).migrate(after))
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate([("accounts", "0014_page_coverage")]))
         old_apps = executor.loader.project_state(before).apps
         user = old_apps.get_model("accounts", "CustomUserModel").objects.create(
             email="migration@test.com", name="M", password="!",
@@ -118,4 +118,4 @@ class PageKeyMigrationTests(TransactionTestCase):
         )
         with mock.patch("django.core.files.storage.default_storage.open", side_effect=AssertionError("network forbidden")):
             MigrationExecutor(connection).migrate(after)
-        self.assertEqual(DocumentPage.objects.get(id=old_page.id).s3_object_key, key)
+        self.assertEqual(DocumentPage.objects.values_list("s3_object_key", flat=True).get(id=old_page.id), key)

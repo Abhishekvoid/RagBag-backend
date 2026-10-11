@@ -8,7 +8,10 @@ from tenacity import (
 )
 import logging
 import openai
-from .deadline import stop_at_deadline, timeout_for, within_deadline
+from .deadline import stop_at_deadline, within_deadline
+from .service_control import async_attempt
+from .circuit_breaker import llm_circuit_breaker
+from .llm_load_control import llm_slot_manager
 
 
 logger = logging.getLogger(__name__)
@@ -58,17 +61,18 @@ async def _call_llm_with_retry(client, messages, json_mode=False, **kwargs):
     """Call the LLM provider, retrying transient failures and empty completions.
 
     There is no secondary provider: OpenRouter is the only one configured, so an
-    exhausted retry budget propagates to the caller and trips the circuit
-    breaker in llm_gateway.
+    each provider attempt updates the shared breaker. Half-open recovery
+    is limited to one attempt, irrespective of the normal retry budget.
     """
     params = {
         "messages": messages,
         **kwargs
 
     }
-    params["timeout"] = timeout_for(params.get("timeout") or 45.0)
 
     if json_mode:
         params["response_format"] = {"type": "json_object"}
 
-    return _content_or_raise(await client.chat.completions.create(**params))
+    async with async_attempt(llm_slot_manager, llm_circuit_breaker) as attempt:
+        params["timeout"] = attempt.timeout(params.get("timeout") or 45.0)
+        return _content_or_raise(await client.chat.completions.create(**params))

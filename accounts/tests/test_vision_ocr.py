@@ -1,3 +1,5 @@
+from unittest import mock
+from utils.circuit_breaker import Permit
 from django.test import SimpleTestCase
 
 from accounts import vision_ocr
@@ -33,6 +35,14 @@ class StripMarkersTest(SimpleTestCase):
 
 
 class ReconstructTest(SimpleTestCase):
+    def setUp(self):
+        breaker = mock.Mock(probe_seconds=90)
+        breaker.acquire.return_value = Permit("test", 0, False)
+        for name, value in [("vision_circuit_breaker", breaker), ("vision_slot_manager", mock.MagicMock())]:
+            patcher = mock.patch.object(vision_ocr, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_reconstruct_returns_markdown_content(self):
         class _Msg:
             content = "## Photosynthesis\n- light reaction in [?thylakoid]"

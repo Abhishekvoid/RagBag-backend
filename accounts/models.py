@@ -89,6 +89,8 @@ class Document(models.Model):
     pending_version = models.PositiveIntegerField(null=True, blank=True)
     version_counter = models.PositiveIntegerField(default=0)
     ingestion_token = models.CharField(max_length=32, blank=True)
+    coverage_audit = models.JSONField(default=dict, blank=True)  # latest attempt, including failures
+    active_coverage = models.JSONField(default=dict, blank=True)
 
     # --- NEW: Define status choices as constants ---
     STATUS_PENDING = 'PENDING'
@@ -124,6 +126,7 @@ class DocumentIndexVersion(models.Model):
     version = models.PositiveIntegerField()
     extracted_text = models.TextField(blank=True)
     chunk_count = models.PositiveIntegerField(default=0)
+    coverage_audit = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     retired_at = models.DateTimeField(null=True, blank=True)
 
@@ -141,11 +144,13 @@ class DocumentPage(models.Model):
 
     SOURCE_LAYER = 'layer'       # born-digital: used the PDF's own text layer
     SOURCE_VISION = 'vision'     # reconstructed by the vision model
-    SOURCE_FALLBACK = 'fallback' # vision unavailable/failed: tesseract or raw layer
+    SOURCE_FALLBACK = 'fallback' # vision unavailable/failed: raw layer
+    SOURCE_OCR = 'ocr'
     SOURCE_CHOICES = [
         (SOURCE_LAYER, 'Text layer'),
         (SOURCE_VISION, 'Vision'),
         (SOURCE_FALLBACK, 'Fallback'),
+        (SOURCE_OCR, 'Local OCR'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -155,6 +160,8 @@ class DocumentPage(models.Model):
     image_url = models.TextField(blank=True)             # Legacy URL; retained for migration recovery
     s3_object_key = models.CharField(max_length=512, blank=True)
     reconstructed_md = models.TextField(blank=True)
+    needs_review = models.BooleanField(default=False)
+    review_reason = models.CharField(max_length=100, blank=True)
     text_source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_LAYER)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -69,9 +69,9 @@ class BuildPagesTest(TestCase):
     @mock.patch.object(page_pipeline, "store_page_image", return_value="1/pages/doc/p1_saved.png")
     def test_previous_page_is_persisted_before_next_page_renders(self, _):
         def pages(path):
-            yield 1, 2, "First page", b"one"
+            yield 1, 2, "First page", b"one", False
             self.assertTrue(self.doc.pages.filter(page_number=1).exists())
-            yield 2, 2, "Second page", b"two"
+            yield 2, 2, "Second page", b"two", False
         with mock.patch.object(page_pipeline, "render_pdf_pages", side_effect=pages), \
              mock.patch.object(page_pipeline, "VISION_ENABLED", False):
             self.assertEqual(page_pipeline.build_document_pages(self.doc), 2)
@@ -82,7 +82,7 @@ class BuildPagesTest(TestCase):
         def pages(path):
             paths.append(path)
             try:
-                yield 1, 1, "Page", b"png"
+                yield 1, 1, "Page", b"png", False
             finally:
                 closed.append(True)
         with mock.patch.object(page_pipeline, "render_pdf_pages", side_effect=pages), \
@@ -103,7 +103,7 @@ class RenderBoundsTests(SimpleTestCase):
                 pdf.new_page(width=72, height=72)
                 pdf.save(path)
             sizes = []
-            for _, _, _, png in page_pipeline.render_pdf_pages(path, dpi=900):
+            for _, _, _, png, _ in page_pipeline.render_pdf_pages(path, dpi=900):
                 pix = fitz.Pixmap(png)
                 sizes.append((pix.width, pix.height))
             self.assertEqual(sizes, [(1024, 2048), (2048, 1024), (150, 150)])

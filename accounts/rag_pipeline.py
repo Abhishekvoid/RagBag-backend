@@ -1,3 +1,4 @@
+from .coverage import COVERAGE_ADVISORY, SourcePages
 
 import os
 import re
@@ -563,6 +564,8 @@ class RagPipeline:
                 while len(summaries) > PAGES_PER_BATCH or len("\n\n".join(summaries)) > MAX_BATCH_CHARS:
                     summaries = await summarize_batches(list(summary_batches(summaries)), REDUCE_PROMPT)
                 guide = await summarize("\n\n".join(summaries), REDUCE_PROMPT)
+            if getattr(pages, "incomplete_coverage", False):
+                guide = COVERAGE_ADVISORY + "\n\n" + guide
             return _result(enforce_markdown_spacing(guide), outcome=PipelineOutcome.SUMMARY_GENERATED)
         except Exception as exc:
             logger.exception("Chapter summary failed")
@@ -583,11 +586,15 @@ class RagPipeline:
                          queryset=DocumentPage.objects.filter(version=F("document__active_version"))
                          .order_by("page_number"),
                      )))
-        pages = []
+        pages = SourcePages()
         for document in documents:
+            pages.incomplete_coverage |= bool(document.active_coverage)
             check_deadline()
             if document.summary_pages:
                 for page in document.summary_pages:
+                    if page.needs_review:
+                        pages.incomplete_coverage = True
+                        continue
                     content = strip_uncertainty_markers(page.reconstructed_md).strip()
                     if content:
                         pages.append(f"{document.title}, page {page.page_number}:\n{content}")
@@ -798,6 +805,8 @@ class RagPipeline:
             logger.info(f" Response preview: {raw_output[:200]}...")
 
             formatted_output = enforce_markdown_spacing(raw_output)
+            if any(r.payload.get("incomplete_coverage") for r in final_results):
+                formatted_output = COVERAGE_ADVISORY + "\n\n" + formatted_output
             if any(r.payload.get("is_fallback_scope") for r in final_results):
                 formatted_output = FALLBACK_ADVISORY + "\n\n" + formatted_output
 

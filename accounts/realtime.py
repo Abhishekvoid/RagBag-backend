@@ -22,7 +22,7 @@ PHASE_FAILED = "failed"
 
 def build_ingestion_status(document_id, phase, *, chapter_id=None, title=None,
                            batch=None, total_batches=None, page=None,
-                           total_pages=None, error=None) -> dict:
+                           total_pages=None, error=None, coverage_audit=None) -> dict:
     """Pure builder for an ingestion_status payload. Optional keys are
     omitted when None so the frontend reducer can treat missing == unchanged."""
     payload = {
@@ -44,6 +44,8 @@ def build_ingestion_status(document_id, phase, *, chapter_id=None, title=None,
         payload["total_pages"] = total_pages
     if error is not None:
         payload["error"] = error
+    if coverage_audit is not None:
+        payload["coverage_audit"] = coverage_audit
     return payload
 
 

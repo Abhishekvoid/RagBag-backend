@@ -56,6 +56,12 @@ class ChatPipelineOutcomeTests(APITestCase):
             **options,
         }, format="json")
 
+    def test_partial_evidence_always_discloses_coverage(self):
+        from accounts.coverage import COVERAGE_ADVISORY
+        self.hits[0].payload["incomplete_coverage"] = True
+        response = self.post_chat()
+        self.assertTrue(response.data["text"].startswith(COVERAGE_ADVISORY))
+
     def test_empty_chapter_does_not_search_other_notes_by_default(self):
         self.dependencies["hybrid_search"].side_effect = [[], self.hits]
         response = self.post_chat()

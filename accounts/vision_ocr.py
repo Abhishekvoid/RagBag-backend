@@ -12,6 +12,9 @@ import os
 import re
 import base64
 import logging
+from utils.service_control import sync_attempt
+from utils.llm_load_control import vision_slot_manager
+from utils.circuit_breaker import vision_circuit_breaker
 from utils.deadline import DeadlineExceeded, timeout_for
 
 logger = logging.getLogger(__name__)
@@ -98,25 +101,28 @@ def reconstruct_page_markdown(image_png_bytes: bytes, *, page_number: int) -> st
     client = _get_client()
     b64 = base64.standard_b64encode(image_png_bytes).decode("utf-8")
     try:
-        resp = client.chat.completions.create(
-            timeout=timeout_for(60),
-            model=VISION_MODEL,
-            temperature=0,
-            max_tokens=4096,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": [
-                    {"type": "text",
-                     "text": f"Transcribe page {page_number} to clean Markdown."},
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                ]},
-            ],
-        )
+        with sync_attempt(vision_slot_manager, vision_circuit_breaker) as attempt:
+            resp = client.chat.completions.create(
+                timeout=attempt.timeout(60),
+                model=VISION_MODEL,
+                temperature=0,
+                max_tokens=4096,
+                messages=[
+                    {"role": "system", "content": _SYSTEM},
+                    {"role": "user", "content": [
+                        {"type": "text",
+                         "text": f"Transcribe page {page_number} to clean Markdown."},
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ]},
+                ],
+            )
+            content = (resp.choices[0].message.content or "").strip()
+            if not content:
+                raise VisionUnavailable("Vision returned no transcription")
+            return content
     except DeadlineExceeded:
         raise
     except Exception as e:
         logger.error("vision reconstruct failed (page %s): %s", page_number, e)
         raise VisionUnavailable(str(e))
-
-    return (resp.choices[0].message.content or "").strip()

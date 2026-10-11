@@ -1,7 +1,10 @@
 """One clock for the whole request, including retries and queueing."""
 import asyncio
 from types import SimpleNamespace
-from unittest import IsolatedAsyncioTestCase, TestCase, mock
+import os
+import uuid
+import redis
+from unittest import IsolatedAsyncioTestCase, TestCase, mock, skipUnless
 from contextlib import contextmanager
 
 from utils.deadline import (
@@ -75,7 +78,21 @@ class BudgetTests(TestCase):
                     wrappers[0](mock.Mock(side_effect=[None, error]), "SELECT 1", None, False, {})
 
 
+@skipUnless(os.getenv("TEST_REDIS_URL"), "Set TEST_REDIS_URL for distributed admission/deadline checks")
 class RetryBudgetTests(IsolatedAsyncioTestCase):
+    def setUp(self):
+        from utils.circuit_breaker import CircuitBreaker
+        from utils.llm_load_control import SlotManager
+        self.redis = redis.from_url(os.environ["TEST_REDIS_URL"], decode_responses=True)
+        name = "deadline-test-" + uuid.uuid4().hex
+        breaker = CircuitBreaker(name, connection=self.redis)
+        slots = SlotManager(service_name=name, connection=self.redis)
+        for attr, value in [("llm_circuit_breaker", breaker), ("llm_slot_manager", slots)]:
+            patcher = mock.patch("utils.llm_wrapper." + attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.redis.delete, breaker.key, breaker.probe_key, slots.key, slots.queue_key)
+
     async def test_backoff_cannot_outlive_request(self):
         from utils.llm_wrapper import _call_llm_with_retry
         import httpx
@@ -94,7 +111,7 @@ class RetryBudgetTests(IsolatedAsyncioTestCase):
         from accounts.rag_pipeline import RagPipeline, PipelineOutcome
         from utils.llm_load_control import SlotManager
         pipeline = object.__new__(RagPipeline)
-        slots = SlotManager(1, 2)
+        slots = SlotManager(1, 2, connection=self.redis)
         cancelled = asyncio.Event()
 
         async def slow(*args):
@@ -109,7 +126,7 @@ class RetryBudgetTests(IsolatedAsyncioTestCase):
                 result = await pipeline.run("Explain gravity", [], "chapter", 1)
         self.assertEqual(result.outcome, PipelineOutcome.DEADLINE_EXCEEDED)
         self.assertTrue(cancelled.is_set())
-        self.assertEqual(slots._waiting, 0)
+        self.assertEqual(slots.redis.zcard(slots.queue_key), 0)
         async with asyncio.timeout(.1):
             async with slots.slot():
                 pass
@@ -146,17 +163,15 @@ class RetryBudgetTests(IsolatedAsyncioTestCase):
     async def test_waiting_for_llm_slot_counts_toward_deadline(self):
         from utils.llm_load_control import SlotManager
         from utils.llm_gateway import ask_llm
-        slots = SlotManager(1, 2)
-        with mock.patch("utils.llm_gateway.llm_slot_manager", slots), \
-             mock.patch("utils.llm_gateway.llm_circuit_breaker") as breaker, \
-             mock.patch("utils.llm_gateway._call_llm_with_retry") as provider:
-            breaker.is_open.return_value = False
+        slots = SlotManager(1, 2, connection=self.redis)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=mock.AsyncMock())))
+        with mock.patch("utils.llm_wrapper.llm_slot_manager", slots):
             async with slots.slot():
                 with deadline_scope(RequestDeadline(.03)):
                     with self.assertRaises(DeadlineExceeded):
-                        await ask_llm(None, [], model="test")
-            self.assertEqual(slots._waiting, 0)
-            provider.assert_not_called()
+                        await ask_llm(client, [], model="test")
+            self.assertEqual(slots.redis.zcard(slots.queue_key), 0)
+            client.chat.completions.create.assert_not_called()
 
     async def test_native_pinecone_read_is_cancelled_and_clients_are_closed(self):
         from accounts import ai_clients, rag_service

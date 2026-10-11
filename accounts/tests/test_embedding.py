@@ -1,3 +1,4 @@
+from utils.circuit_breaker import Permit, ServiceUnavailable
 """Embedding client tests — all HTTP is mocked, the real provider is never called.
 
 The dimension check is the important one. A provider that silently returns
@@ -110,8 +111,10 @@ class PoolingGuardTests(TestCase):
     def test_mean_pooled_response_is_rejected_by_the_client(self):
         """Wrong pooling must fail the call, not just fail a helper."""
         client = EmbeddingClient()
+        client.slot_manager = mock.MagicMock()
         client.cb = mock.MagicMock()
-        client.cb.is_open.return_value = False
+        client.cb.acquire.return_value = Permit("test", 0, False)
+        client.cb.probe_seconds = 90
         request = httpx.Request("POST", "https://provider.test/embed")
         response = httpx.Response(
             200,
@@ -145,8 +148,10 @@ class OversizedInputIsRefusedTests(TestCase):
 
     def setUp(self):
         self.client = EmbeddingClient()
+        self.client.slot_manager = mock.MagicMock()
         self.client.cb = mock.MagicMock()
-        self.client.cb.is_open.return_value = False
+        self.client.cb.acquire.return_value = Permit("test", 0, False)
+        self.client.cb.probe_seconds = 90
 
     def test_oversized_input_never_reaches_the_provider(self):
         post = mock.AsyncMock()
@@ -226,8 +231,10 @@ class AuthHeaderTests(TestCase):
 class EmbedTextsTests(TestCase):
     def setUp(self):
         self.client = EmbeddingClient()
+        self.client.slot_manager = mock.MagicMock()
         self.client.cb = mock.MagicMock()
-        self.client.cb.is_open.return_value = False
+        self.client.cb.acquire.return_value = Permit("test", 0, False)
+        self.client.cb.probe_seconds = 90
 
     def _no_backoff(self):
         """Retries are real; their sleeps are not worth 80s of suite time."""
@@ -249,7 +256,7 @@ class EmbedTextsTests(TestCase):
 
         self.assertEqual(len(out), 1)
         self.assertEqual(len(out[0]), DIM)
-        self.client.cb.record_success.assert_called_once()
+        self.client.cb.finish.assert_called_once_with(self.client.cb.acquire.return_value, "success")
 
     def test_auth_header_is_actually_sent(self):
         post = mock.AsyncMock(return_value=self._respond([vec()]))
@@ -322,7 +329,7 @@ class EmbedTextsTests(TestCase):
         )
 
     def test_open_circuit_short_circuits_without_http(self):
-        self.client.cb.is_open.return_value = True
+        self.client.cb.acquire.side_effect = ServiceUnavailable("open")
         post = mock.AsyncMock()
         with mock.patch.object(self.client.client, "post", new=post):
             with self.assertRaises(emb.EmbeddingServiceUnavailable):
