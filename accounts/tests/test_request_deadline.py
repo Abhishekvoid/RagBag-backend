@@ -5,7 +5,7 @@ import os
 import uuid
 import redis
 from unittest import IsolatedAsyncioTestCase, TestCase, mock, skipUnless
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from utils.deadline import (
     DeadlineExceeded, RequestDeadline, current_deadline, deadline_scope,
@@ -78,6 +78,44 @@ class BudgetTests(TestCase):
                     wrappers[0](mock.Mock(side_effect=[None, error]), "SELECT 1", None, False, {})
 
 
+class RetryPolicyTests(IsolatedAsyncioTestCase):
+    async def test_backoff_cannot_outlive_request(self):
+        from utils.llm_wrapper import _call_llm_with_retry
+        from tenacity import wait_fixed
+        import httpx
+        import openai
+
+        @asynccontextmanager
+        async def admitted(*args):
+            yield SimpleNamespace(timeout=timeout_for)
+
+        error = openai.APITimeoutError(request=httpx.Request("POST", "https://example.invalid"))
+
+        async def fail_provider(**kwargs):
+            remaining.return_value = .05
+            raise error
+
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+            create=mock.AsyncMock(side_effect=fail_provider),
+        )))
+        sleep = mock.AsyncMock(side_effect=AssertionError("Unexpected retry sleep"))
+        # Control the budget after the first attempt, not Redis/scheduler speed.
+        # Leave asyncio's clock alone and retain the real retry/deadline logic.
+        with (
+            mock.patch.object(RequestDeadline, "remaining", new_callable=mock.PropertyMock, return_value=30) as remaining,
+            deadline_scope(RequestDeadline(30)),
+            mock.patch("utils.llm_wrapper.async_attempt", admitted),
+            mock.patch.object(_call_llm_with_retry.retry, "wait", wait_fixed(1)),
+            mock.patch.object(_call_llm_with_retry.retry, "sleep", sleep),
+        ):
+            with self.assertRaises(openai.APITimeoutError) as raised:
+                await _call_llm_with_retry(client, [], model="test", timeout=45)
+        self.assertIs(raised.exception, error)
+        client.chat.completions.create.assert_awaited_once()
+        self.assertEqual(client.chat.completions.create.call_args.kwargs["timeout"], 30)
+        sleep.assert_not_awaited()
+
+
 @skipUnless(os.getenv("TEST_REDIS_URL"), "Set TEST_REDIS_URL for distributed admission/deadline checks")
 class RetryBudgetTests(IsolatedAsyncioTestCase):
     def setUp(self):
@@ -92,20 +130,6 @@ class RetryBudgetTests(IsolatedAsyncioTestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.addCleanup(self.redis.delete, breaker.key, breaker.probe_key, slots.key, slots.queue_key)
-
-    async def test_backoff_cannot_outlive_request(self):
-        from utils.llm_wrapper import _call_llm_with_retry
-        import httpx
-        import openai
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
-            create=mock.AsyncMock(side_effect=openai.APITimeoutError(
-                request=httpx.Request("POST", "https://example.invalid"))),
-        )))
-        with deadline_scope(RequestDeadline(.05)):
-            with self.assertRaises((DeadlineExceeded, openai.APITimeoutError)):
-                await _call_llm_with_retry(client, [], model="test", timeout=45)
-        self.assertEqual(client.chat.completions.create.await_count, 1)
-        self.assertLessEqual(client.chat.completions.create.call_args.kwargs["timeout"], .05)
 
     async def test_pipeline_deadline_cancels_stage_and_releases_queue_slot(self):
         from accounts.rag_pipeline import RagPipeline, PipelineOutcome
